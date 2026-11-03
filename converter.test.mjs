@@ -179,15 +179,40 @@ const handZipV3 = storedZip({
   'manifest.json': JSON.stringify({
     formatVersion: 3,
     mode: 'full',
-    stores: { characters: { parts: 1, count: 1 }, messages: { parts: 1, count: 0 } },
+    stores: {
+      characters: { parts: 1, count: 1 },
+      messages: { parts: 1, count: 0 },
+      mediaAssets: { parts: 1, count: 1 },
+    },
   }),
   'metadata.json': JSON.stringify({ version: 3, timestamp: 3 }),
-  'stores/characters.000.json': JSON.stringify([{ id: 'c3', name: '手抓角色V3' }]),
+  'stores/characters.000.json': JSON.stringify([{
+    id: 'c3', name: '手抓角色V3', avatar: 'https://example.test/avatar.webp',
+    systemPrompt: '你是 {{char}}', description: '重要备注', worldview: '天空城',
+  }]),
   'stores/messages.000.json': '[]',
+  'stores/mediaAssets.000.json': JSON.stringify([{ charId: 'c3', avatar: 'blobref:avatar-c3' }]),
+  'blobs/index.json': JSON.stringify([{ id: 'avatar-c3', type: 'image/webp', size: 4 }]),
+  'blobs/avatar-c3': pngBytes,
 });
 const handReadV3 = await context.readZipBackup({ arrayBuffer: async () => handZipV3 });
 assert.equal(handReadV3.format, 'sully-hand', 'formatVersion: 3 的全量备份应识别为 sully-hand');
 assert.equal(handReadV3.data.characters[0].name, '手抓角色V3');
+assert.equal(handReadV3.data.mediaAssets[0].avatar, 'data:image/webp;base64,AQIDBA==',
+  'Sully mediaAssets 中的 blobref 头像应通过 blobs/index.json 还原');
+const handV3Ephone = context.toEphoneCompatible('sully-hand', handReadV3.data).data;
+assert.equal(handV3Ephone.chats[0].avatar, 'data:image/webp;base64,AQIDBA==',
+  '角色远程头像应使用唯一且明确关联的 mediaAssets 本地副本');
+const handV3ChillBlob = await context.toChillBackup('sully-hand', handReadV3.data);
+const handV3ChillMap = context.zipEntryMap(await context.readZipEntries({
+  name: 'hand-v3-chill.zip',
+  arrayBuffer: () => handV3ChillBlob.arrayBuffer(),
+}));
+const handV3Chill = JSON.parse(new TextDecoder().decode(handV3ChillMap.get('database.json')));
+assert.match(handV3Chill.characters[0].persona, /你是 手抓角色V3/);
+assert.match(handV3Chill.characters[0].persona, /重要备注/);
+assert.match(handV3Chill.characters[0].persona, /天空城/);
+assert.deepEqual([...handV3ChillMap.get('assets/char-avatar-1')], [...pngBytes]);
 
 const nuojiji = {
   version: 5,
@@ -592,6 +617,33 @@ const zzSource = context.toZzBackup('ephone', ephone);
 const nuojijiSource = context.toNuojijiBackup('ephone', ephone);
 const handSource = context.toSullyBackup('sully-hand', 'ephone', ephone);
 const csySource = context.toSullyBackup('sully-csy', 'ephone', ephone);
+const chillInput = JSON.parse(JSON.stringify(ephone));
+chillInput.data.chats[0].avatar = 'data:image/png;base64,AQIDBA==';
+Object.assign(chillInput.data.chats[0], {
+  title: '星星', mbti: 'INFJ', customQ1: '最喜欢什么？', customQ2: '夜空',
+});
+const chillBlob = await context.toChillBackup('ephone', chillInput);
+const chillRead = await context.readBackup({
+  name: 'chill-backup.zip',
+  arrayBuffer: () => chillBlob.arrayBuffer(),
+});
+assert.equal(chillRead.format, 'chill');
+assert.equal(chillRead.data._meta.version, 11);
+assert.equal(chillRead.data._meta.partial, true);
+assert.equal(chillRead.data.characters.length, 1, 'Chill 不支持群聊角色');
+assert.equal(chillRead.data.messages.length, 2, 'Chill 只迁移普通私聊文本');
+assert.equal(chillRead.data.characters[0].avatarData, 'data:image/png;base64,AQIDBA==');
+assert.equal(chillRead.data.characters[0].title, '星星');
+assert.equal(chillRead.data.characters[0].mbti, 'INFJ');
+Object.assign(chillRead.data.messages[1], {
+  recalled: true, recallContent: '原消息', recallThought: '撤回原因',
+});
+const chillEphone = context.toEphoneCompatible('chill', chillRead.data).data;
+assert.equal(chillEphone.chats.length, 1);
+assert.equal(chillEphone.chats[0].history.length, 2);
+assert.equal(chillEphone.chats[0].settings.aiPersona, '温柔');
+assert.equal(chillEphone.chats[0].customQ1, '最喜欢什么？');
+assert.equal(chillEphone.chats[0].history[1].recallThought, '撤回原因');
 
 const sources = {
   ephone,
@@ -602,6 +654,7 @@ const sources = {
   'sully-csy': csySource,
   wanwan,
   float: floatData,
+  chill: chillRead.data,
 };
 
 // 每种源格式转成弯弯与 Float
@@ -622,10 +675,17 @@ for (const [format, data] of Object.entries(sources)) {
     .sources[0].stores;
   const sessionCount = stores.find((store) => store.name === 'sessions').records.length;
   assert.ok(sessionCount > 0, `${format} → Float 一个会话都没有`);
+
+  const chillZip = await context.toChillBackup(format, data);
+  const convertedChill = await context.readBackup({
+    name: `${format}-chill.zip`, arrayBuffer: () => chillZip.arrayBuffer(),
+  });
+  assert.equal(convertedChill.format, 'chill', `${format} → Chill 输出不合法`);
+  assert.ok(convertedChill.data.characters.length > 0, `${format} → Chill 一个角色都没有`);
 }
 
 // 弯弯与 Float 转成其余每种格式
-for (const [format, data] of [['wanwan', wanwan], ['float', floatData]]) {
+for (const [format, data] of [['wanwan', wanwan], ['float', floatData], ['chill', chillRead.data]]) {
   const asOctopus = context.toOctopusBackup(format, data);
   assert.ok(asOctopus.characters.length + asOctopus.groups.length > 0, `${format} → 章鱼机 为空`);
 
@@ -826,6 +886,12 @@ for (const [format, data] of Object.entries(newSources)) {
   }
 
   assert.ok((await context.toFloatBackup(format, data)).size > 0, `${format} → Float 为空`);
+  const chillZip = await context.toChillBackup(format, data);
+  const asChill = await context.readBackup({
+    name: `${format}-chill.zip`, arrayBuffer: () => chillZip.arrayBuffer(),
+  });
+  assert.equal(asChill.format, 'chill', `${format} → Chill 输出不合法`);
+  assert.ok(asChill.data.characters.length > 0, `${format} → Chill 为空`);
 }
 
 // ===== 记忆迁移 =====

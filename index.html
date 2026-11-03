@@ -230,7 +230,7 @@
       <header>
         <div>
           <h1>小手机备份转换器</h1>
-          <p class="subtitle">在 330 / 兔k机、章鱼机、zz、弯弯、Float、糯叽机与两种糯米机之间转换备份。所有处理都在当前浏览器中完成。</p>
+          <p class="subtitle">在 330 / 兔k机、章鱼机、zz、弯弯、Float、糯叽机、Chill 与两种糯米机之间转换备份。所有处理都在当前浏览器中完成。</p>
         </div>
         <div class="local-mark">本地离线处理</div>
       </header>
@@ -239,7 +239,7 @@
         <section class="surface" aria-label="转换设置">
           <div class="step">
             <div class="step-head"><span class="step-num">01</span><h2>选择备份文件</h2></div>
-            <p class="step-note">支持糯叽机 v5、章鱼机 `.ee`，330/兔k机、zz、弯弯、Float、手抓糯米机与 csy 糯米机的 JSON / ZIP 备份。</p>
+            <p class="step-note">支持糯叽机 v5、章鱼机 `.ee`，330/兔k机、zz、弯弯、Float、Chill、手抓糯米机与 csy 糯米机的 JSON / ZIP 备份。</p>
             <!-- label 直接包住 input（不写 for）：两者同时存在时，点一次会在部分浏览器里
                  转发成两次点击，把文件选择框弹两遍。 -->
             <label class="dropzone" id="dropzone">
@@ -300,6 +300,10 @@
               <label class="target-option">
                 <input type="radio" name="target" value="miya" />
                 <strong>miya小手机</strong><span>Miya ZIP 备份</span>
+              </label>
+              <label class="target-option">
+                <input type="radio" name="target" value="chill" />
+                <strong>Chill 小手机</strong><span>Chill v11 原生 ZIP（本地私用）</span>
               </label>
             </div>
           </div>
@@ -696,6 +700,12 @@
           Array.isArray(manifest.files));
       }
 
+      function isChillBackup(data) {
+        return Boolean(data && typeof data === "object" && data._meta &&
+          Number(data._meta.version) === 11 &&
+          Array.isArray(data.characters) && Array.isArray(data.messages));
+      }
+
       function isYuanUwuBackup(data) {
         // yuan改uwu 导出：version === 1，chats / worldBooks 在顶层，无 localStorage 字段。
         // 不能只靠 typeof version === "number" 判断，EPhone v3 也有数字 version；
@@ -822,12 +832,26 @@
       function restoreZipAssets(root, entryMap) {
         const cache = new Map();
         const seen = new WeakSet();
+        let blobIndex = new Map();
+        if (entryMap.has("blobs/index.json")) {
+          const rows = parseZipJson(entryMap, "blobs/index.json");
+          if (!Array.isArray(rows)) throw new Error("损坏的手抓糯米机备份：blobs/index.json 不是数组。");
+          blobIndex = new Map(rows
+            .filter((row) => row && typeof row.id === "string")
+            .map((row) => [row.id, row]));
+        }
         const visit = (value) => {
-          if (typeof value === "string" && value.startsWith("assets/")) {
+          if (typeof value === "string" && (value.startsWith("assets/") || value.startsWith("blobref:"))) {
             if (cache.has(value)) return cache.get(value);
-            const bytes = entryMap.get(value);
+            const isBlob = value.startsWith("blobref:");
+            const info = isBlob ? blobIndex.get(value.slice(8)) : null;
+            const path = isBlob ? `blobs/${value.slice(8)}` : value;
+            const bytes = entryMap.get(path);
             if (!bytes) return value;
-            const dataUrl = `data:${assetMime(value)};base64,${bytesToBase64(bytes)}`;
+            if (isBlob && (!info || Number(info.size) !== bytes.length)) return value;
+            const mime = isBlob ? String(info.type || "") : assetMime(path);
+            if (!/^image\/(?:png|jpeg|webp|gif)$/.test(mime)) return value;
+            const dataUrl = `data:${mime};base64,${bytesToBase64(bytes)}`;
             cache.set(value, dataUrl);
             return dataUrl;
           }
@@ -841,6 +865,21 @@
           return value;
         };
         return visit(root);
+      }
+
+      function readChillZip(entryMap) {
+        const data = parseZipJson(entryMap, "database.json", "Chill 备份缺少 database.json。");
+        if (!isChillBackup(data)) throw new Error("此 ZIP 不是可识别的 Chill v11 备份。");
+        const assetMeta = new Map(asArray(data.assets_meta)
+          .filter((row) => row && row.key)
+          .map((row) => [String(row.key), row]));
+        data.characters = asArray(data.characters).map((character) => {
+          const key = String(character?.avatarUrl || "");
+          const bytes = key ? entryMap.get(`assets/${key}`) : null;
+          const mime = assetMeta.get(key)?.mimeType || "image/png";
+          return bytes ? { ...character, avatarData: `data:${mime};base64,${bytesToBase64(bytes)}` } : character;
+        });
+        return data;
       }
 
       // Float 把媒体单独存成 media/<sha256>.bin，JSON 里只留一个引用对象；
@@ -1019,6 +1058,11 @@
         const decoder = new TextDecoder("utf-8");
         const fragments = [];
 
+        if (entryMap.has("database.json")) {
+          const data = readChillZip(entryMap);
+          return { format: "chill", sourceLabel: "Chill 小手机", data };
+        }
+
         if (entryMap.has("manifest.json")) {
           const manifest = parseZipJson(entryMap, "manifest.json");
 
@@ -1069,7 +1113,7 @@
           }
         }
         if (!fragments.length) {
-          throw new Error("此 ZIP 内没有找到可识别的备份数据。请选择原生导出的 330、zz 或糯米机 ZIP。");
+          throw new Error("此 ZIP 内没有找到可识别的备份数据。请选择原生导出的 330、zz、Chill 或糯米机 ZIP。");
         }
         return { format: "ephone", sourceLabel: "330 分片备份", data: mergeEphoneFragments(fragments) };
       }
@@ -1106,7 +1150,7 @@
         } catch (error) {
           throw new Error("文件不是有效的 JSON 备份，或文件内容已损坏。");
         }
-        throw new Error("未识别此备份格式。请选择糯叽机、章鱼机、330/兔k机、zz、弯弯、Float、糯米机、yuan改uwu、1900版uwu 或 miya小手机的原生备份文件。");
+        throw new Error("未识别此备份格式。请选择糯叽机、章鱼机、330/兔k机、zz、弯弯、Float、Chill、糯米机、yuan改uwu、1900版uwu 或 miya小手机的原生备份文件。");
       }
 
       function sourceData(data) {
@@ -1621,6 +1665,22 @@
 
       function sullyToEphone(rawData) {
         const messages = asArray(rawData.messages);
+        const embeddedAvatar = (value) => typeof value === "string" &&
+          /^data:image\/(?:png|jpeg|webp|gif);base64,/.test(value);
+        const characterAvatar = (character) => {
+          const original = character.avatar || "";
+          if (embeddedAvatar(original)) return original;
+          const candidates = [
+            ...asArray(rawData.mediaAssets)
+              .filter((row) => row && String(row.charId) === String(character.id))
+              .map((row) => row.avatar),
+            ...asArray(rawData.assets)
+              .filter((row) => row && String(row.id) === String(original))
+              .map((row) => row.data),
+          ].filter(embeddedAvatar);
+          const unique = [...new Set(candidates)];
+          return unique.length === 1 ? unique[0] : original;
+        };
         const toWorldBook = (book, index) => ({
           id: book.id || `sully_wb_${index}`,
           name: book.title || book.name || `世界书 ${index + 1}`,
@@ -1631,11 +1691,17 @@
             enabled: book.disable !== true && book.enabled !== false,
           }],
         });
-        const privateChats = asArray(rawData.characters).map((character) => toEphoneChat({
-          ...character,
-          persona: character.systemPrompt || character.description || "",
-          history: messages.filter((message) => !message.groupId && String(message.charId) === String(character.id)),
-        }, false));
+        const privateChats = asArray(rawData.characters).map((character) => ({
+          ...toEphoneChat({
+            ...character,
+            avatar: characterAvatar(character),
+            persona: character.systemPrompt || character.description || "",
+            history: messages.filter((message) => !message.groupId && String(message.charId) === String(character.id)),
+          }, false),
+          systemPrompt: character.systemPrompt || "",
+          description: character.description || "",
+          worldview: character.worldview || "",
+        }));
         const groupChats = asArray(rawData.groups).map((group) => toEphoneChat({
           ...group,
           history: messages.filter((message) => String(message.groupId || "") === String(group.id)),
@@ -2160,7 +2226,61 @@
       // 记忆不挂在聊天上、需要单独搬运的源格式。
       const MEMORY_EXTERNAL_SOURCES = new Set(["sully-hand", "sully-csy", "float", "nuojiji"]);
 
+      function chillMessageText(message) {
+        if (typeof message?.content === "string") return message.content;
+        return asArray(message?.parts)
+          .filter((part) => part && part.type === "text" && typeof part.content === "string")
+          .map((part) => part.content)
+          .join("\n");
+      }
+
+      function chillToEphone(rawData) {
+        const messages = asArray(rawData.messages);
+        return {
+          version: 3,
+          timestamp: Date.now(),
+          data: {
+            chats: asArray(rawData.characters).map((character) => {
+              const id = String(character.id);
+              return {
+                id,
+                name: character.name || "未命名角色",
+                avatar: character.avatarData || "",
+                title: character.title || "",
+                mbti: character.mbti || "",
+                customQ1: character.customQ1 || "",
+                customQ2: character.customQ2 || "",
+                isGroup: false,
+                history: messages
+                  .filter((message) => String(message.charId) === id &&
+                    (message.role === "user" || message.role === "assistant"))
+                  .map((message, index) => ({
+                    id: message.id ?? `chill_${id}_${index}`,
+                    role: message.role,
+                    content: chillMessageText(message),
+                    type: "text",
+                    timestamp: asTimestamp(message.timestamp || Date.now() + index),
+                    status: message.status || "sent",
+                    recalled: Boolean(message.recalled),
+                    recallContent: message.recallContent || "",
+                    recallThought: message.recallThought || "",
+                  })),
+                settings: {
+                  aiPersona: character.persona || "",
+                  aiAvatar: character.avatarData || "",
+                },
+              };
+            }),
+            worldBooks: [],
+            userStickers: [],
+            apiConfig: [],
+            globalSettings: [{ name: "我", avatar: "", bio: "" }],
+          },
+        };
+      }
+
       function toEphoneCompatibleRaw(sourceFormat, rawData) {
+        if (sourceFormat === "chill") return chillToEphone(rawData);
         if (sourceFormat === "nuojiji") return nuojijiToEphone(rawData);
         if (sourceFormat === "wanwan") return wanwanToEphone(rawData);
         if (sourceFormat === "float") return floatToEphone(rawData);
@@ -3498,6 +3618,108 @@
         return new Blob([...localParts, ...centralParts, end], { type: "application/zip" });
       }
 
+      function chillImageAsset(dataUrl) {
+        if (typeof dataUrl !== "string") return null;
+        const match = dataUrl.match(/^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/);
+        if (!match) return null;
+        try {
+          const binary = atob(match[2]);
+          const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+          if (!bytes.length || bytes.length > 20 * 1024 * 1024) return null;
+          return { mimeType: match[1], bytes };
+        } catch (error) {
+          return null;
+        }
+      }
+
+      function chillPersona(chat) {
+        const settings = chat.settings || {};
+        const sections = [
+          ["核心设定", valueOr(chat, ["systemPrompt", "persona"],
+            valueOr(settings, ["aiPersona", "ai-persona"], ""))],
+          ["用户备注/爱称；核心设定优先", valueOr(chat, ["description"], "")],
+          ["世界观与设定", valueOr(chat, ["worldview", "worldView"], "")],
+        ].filter(([, value]) => typeof value === "string" && value.trim());
+        const unique = sections.filter(([, value], index) =>
+          sections.findIndex(([, candidate]) => candidate.trim() === value.trim()) === index);
+        const persona = unique.length <= 1
+          ? (unique[0]?.[1] || "")
+          : unique.map(([label, value]) => `【${label}】\n${value}`).join("\n\n");
+        return persona.replace(/\{\{\s*char\s*\}\}/gi, chat.name || "未命名角色");
+      }
+
+      function toChillBackup(sourceFormat, rawData) {
+        const data = toEphoneCompatible(sourceFormat, rawData).data;
+        const chats = asArray(data.chats).filter((chat) => !chat.isGroup);
+        const orderedIds = [...new Set(chats.map((chat) => String(chat.id)))].sort();
+        const idMap = new Map(orderedIds.map((id, index) => [id, index + 1]));
+        const now = Date.now();
+        const assets = [];
+        const assetsMeta = [];
+        const characters = chats.map((chat) => {
+          const id = idMap.get(String(chat.id));
+          const settings = chat.settings || {};
+          const image = chillImageAsset(chat.avatar || valueOr(settings, ["aiAvatar", "ai-avatar"], ""));
+          const avatarUrl = image ? `char-avatar-${id}` : "";
+          if (image) {
+            assets.push({ name: `assets/${avatarUrl}`, bytes: image.bytes });
+            assetsMeta.push({ key: avatarUrl, mimeType: image.mimeType, size: image.bytes.length, updatedAt: now });
+          }
+          return {
+            id,
+            name: chat.name || "未命名角色",
+            title: typeof chat.title === "string" ? chat.title : "",
+            mbti: typeof chat.mbti === "string" ? chat.mbti : "",
+            persona: chillPersona(chat),
+            customQ1: typeof chat.customQ1 === "string" ? chat.customQ1 : "",
+            customQ2: typeof chat.customQ2 === "string" ? chat.customQ2 : "",
+            avatarUrl,
+            aiData: null,
+          };
+        });
+        const pendingMessages = [];
+        chats.forEach((chat) => asArray(chat.history).forEach((message, sourceIndex) => {
+          const rawRole = message.role || message.sender;
+          const role = rawRole === "user" || rawRole === "me"
+            ? "user" : rawRole === "assistant" || rawRole === "them" ? "assistant" : null;
+          const type = message.type || "text";
+          const content = valueOr(message, ["content", "text", "message"], "");
+          if (type !== "text" || typeof content !== "string" || !role) return;
+          pendingMessages.push({
+            charId: String(idMap.get(String(chat.id))),
+            role,
+            content,
+            timestamp: asTimestamp(message.timestamp || message.time || now + sourceIndex),
+            sourceIndex: pendingMessages.length,
+          });
+        }));
+        pendingMessages.sort((left, right) => left.timestamp - right.timestamp || left.sourceIndex - right.sourceIndex);
+        const messages = pendingMessages.map((message, index) => ({
+          id: index + 1,
+          charId: message.charId,
+          role: message.role,
+          parts: [{ type: "text", content: message.content }],
+          content: message.content,
+          timestamp: message.timestamp,
+          status: "sent",
+          recalled: false,
+          recallContent: "",
+          recallThought: "",
+        }));
+        const database = {
+          _meta: { version: 11, timestamp: now, partial: true },
+          characters,
+          messages,
+          chat_bindings: [],
+          assets_meta: assetsMeta,
+        };
+        const encoder = new TextEncoder();
+        return buildZipBlob([
+          { name: "database.json", bytes: encoder.encode(JSON.stringify(database)) },
+          ...assets,
+        ]);
+      }
+
       // 索引要跟 Float 的 Dexie schema 一致：导入到一个从没装过 Float 的浏览器时，
       // 是这份声明决定新建的 objectStore 长什么样；缺索引会让 Dexie 的查询报 SchemaError。
       const FLOAT_CHAT_INDEXES = {
@@ -3752,6 +3974,14 @@
       }
 
       function collectStats(format, data) {
+        if (format === "chill") {
+          return {
+            characters: asArray(data.characters).length,
+            groups: 0,
+            messages: asArray(data.messages).length,
+            worldBooks: 0,
+          };
+        }
         if (format === "nuojiji") {
           const converted = nuojijiToEphone(data).data;
           const chats = asArray(converted.chats);
@@ -3849,7 +4079,7 @@
       function targetSupportsNuojiji(target) {
         // 弯弯与 Float 都从 ephone 中间格式生成，糯叽机已有对应的规范化路径。
         // yuan改uwu / 1900版uwu / miya 同样只依赖这条路径，所以一并放行。
-        return ["ephone", "octopus", "nuojiji", "wanwan", "float", "yuanuwu", "1900uwu", "miya"].includes(target);
+        return ["ephone", "octopus", "nuojiji", "wanwan", "float", "yuanuwu", "1900uwu", "miya", "chill"].includes(target);
       }
 
       async function gzipJson(data) {
@@ -3968,6 +4198,9 @@
           } else if (target === "miya") {
             const blob = await toMiyaBackup(source.format, source.data, options);
             showSuccess(source.sourceLabel, "miya小手机", stats, blob, `miya_转换备份_${date}.zip`);
+          } else if (target === "chill") {
+            const blob = await toChillBackup(source.format, source.data);
+            showSuccess(source.sourceLabel, "Chill 小手机", stats, blob, `chill-converted-backup-${date}.zip`);
           } else {
             const output = toSullyBackup(target, source.format, source.data, options);
             const blob = new Blob([JSON.stringify(output, null, 2)], { type: "application/json" });
