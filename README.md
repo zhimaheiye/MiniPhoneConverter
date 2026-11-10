@@ -13,6 +13,7 @@
 - csy 糯米机导出的 `data.json` ZIP 或兼容 JSON。ZIP 内的 `assets/` 图片会在转换时自动还原。
 - 弯弯小手机导出的 JSON 完整备份（`appName: "弯弯"`）。
 - Float 小手机导出的 ZIP 备份（`manifest.json` + `modules/`）。ZIP 内 `media/` 里的图片会在转换时自动还原。
+- [SxiPhone 小手机](https://siixii00.github.io/sxiphone00/) 的 JSON 备份：普通导出、完整备份、SXStorage 原生备份，以及最小备份中的角色。支持从 `persistedData`、`chatSessions`、`keyValue`、`localforage` 或 `localStorage` 读取通用数据。
 
 输出规则：
 
@@ -25,10 +26,17 @@
 - 目标为“弯弯小手机”时生成弯弯原生 JSON，可在设置的“导入备份”中导入。世界书会写进弯弯的 `lorebooks` 配置，转换过来的世界书一律按全局注入，需要绑定到单个角色请导入后自行调整。
 - 目标为“Float 小手机”时生成 Float 原生 ZIP，可在“数据管理 → 导入备份”中导入。聊天、角色卡、设置分属三个模块，按模块勾选导入时三个都要勾上才完整。
 - 目标为“Chill 小手机”时生成 Chill v11 原生精简 ZIP。角色、人设、普通私聊文本和可内嵌头像会迁移；目标现有面具在首次打开聊天时选择。Chill 来源也可以转换到其他已支持的小手机。
+- 目标为“SxiPhone 小手机”时生成原生 JSON，迁移角色、人设、普通私聊文本、头像、用户身份、世界书与表情。群聊、长期记忆、API 配置及专属应用数据不迁移；仅含群聊的备份会明确报错。
 
-### Chill 本地私用适配
+### SxiPhone 导入说明
 
-Chill 适配仅保留在本地分支，不提交到免费小手机社区的上游项目。Chill 原生备份中的角色、普通私聊文本和内嵌头像会进入通用聊天中间格式，因此可以继续转换到 330、章鱼机、糯叽机、两种糯米机、弯弯、Float、yuan 改、1900 uwu 和 miya。群聊、面具绑定、世界书、长期记忆、API 设置及 Chill 独有应用数据没有可确认的通用等价结构。
+转换文件可在 SxiPhone 设置的普通备份导入中恢复角色和聊天，导入后刷新页面。**如果需要世界书，请在设置 → 本地文件夹 → 从资料夹汇入中选择转换后的 JSON，再刷新**；该入口需要浏览器支持 File System Access API（如桌面 Chrome / Edge）。目标当前的普通导入流程会在保存设置时覆盖刚导入的世界书，因此普通导入不保证世界书保留。转换结果中也会提示这一区别。
+
+输入中的多份存储副本按聊天页实际优先读取的 `persistedData` 取值，避免重复生成会话；没有聊天记录的角色也会保留。世界书无关键词的条目转入 SxiPhone 的全局分类，有关键词的条目转入关键词分类，保留条目开关、关键词与会话挂载；表情库保留名称和图片地址。源备份本身被 SxiPhone 导出时裁剪掉的数据无法恢复。
+
+### Chill 扩展分支适配
+
+Chill 适配维护在此 Fork 的扩展分支，不提交到免费小手机社区的上游项目。Chill 原生备份中的角色、普通私聊文本和内嵌头像会进入通用聊天中间格式，因此可以继续转换到 330、章鱼机、糯叽机、两种糯米机、弯弯、Float、yuan 改、1900 uwu、miya 和 SxiPhone。群聊、面具绑定、世界书、长期记忆、API 设置及 Chill 独有应用数据没有可确认的通用等价结构。
 
 转换到 Chill 时生成替换角色、消息与聊天绑定的 `partial: true` 精简包。角色 ID 使用按来源 ID 排序后生成的稳定正整数，消息按时间排序，头像仅接受有效的 PNG、JPEG、WebP 或 GIF data URL。远程头像不会联网下载。
 
@@ -81,7 +89,7 @@ Float 的表情是按图集分组的（`ai_phone_sticker_packs_v1`）。转出�
 
 使用方法：
 1.导出你想转移小手机的备份。
-2.点击网址：https://nikonotnicotine.github.io/MiniPhoneConverter/
+2.点击网址：https://zhimaheiye.github.io/MiniPhoneConverter/
 3.上传备份 --> 选择转换到哪个小手机 ---> 开始转换 ---> 下载
 
 版本记录：

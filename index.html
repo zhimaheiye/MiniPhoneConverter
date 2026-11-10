@@ -230,7 +230,7 @@
       <header>
         <div>
           <h1>小手机备份转换器</h1>
-          <p class="subtitle">在 330 / 兔k机、章鱼机、zz、弯弯、Float、糯叽机、Chill 与两种糯米机之间转换备份。所有处理都在当前浏览器中完成。</p>
+          <p class="subtitle">在 330 / 兔k机、章鱼机、zz、弯弯、Float、糯叽机、Chill、SxiPhone 与两种糯米机之间转换备份。所有处理都在当前浏览器中完成。</p>
         </div>
         <div class="local-mark">本地离线处理</div>
       </header>
@@ -239,7 +239,7 @@
         <section class="surface" aria-label="转换设置">
           <div class="step">
             <div class="step-head"><span class="step-num">01</span><h2>选择备份文件</h2></div>
-            <p class="step-note">支持糯叽机 v5、章鱼机 `.ee`，330/兔k机、zz、弯弯、Float、Chill、手抓糯米机与 csy 糯米机的 JSON / ZIP 备份。</p>
+            <p class="step-note">支持糯叽机 v5、章鱼机 `.ee`，330/兔k机、zz、弯弯、Float、Chill、SxiPhone、手抓糯米机与 csy 糯米机的 JSON / ZIP 备份。</p>
             <!-- label 直接包住 input（不写 for）：两者同时存在时，点一次会在部分浏览器里
                  转发成两次点击，把文件选择框弹两遍。 -->
             <label class="dropzone" id="dropzone">
@@ -304,6 +304,10 @@
               <label class="target-option">
                 <input type="radio" name="target" value="chill" />
                 <strong>Chill 小手机</strong><span>Chill v11 原生 ZIP（本地私用）</span>
+              </label>
+              <label class="target-option">
+                <input type="radio" name="target" value="sxiphone" />
+                <strong>SxiPhone 小手机</strong><span>原生 JSON · 仅普通私聊</span>
               </label>
             </div>
           </div>
@@ -704,6 +708,36 @@
         return Boolean(data && typeof data === "object" && data._meta &&
           Number(data._meta.version) === 11 &&
           Array.isArray(data.characters) && Array.isArray(data.messages));
+      }
+
+      function sxiphoneData(data) {
+        return data?.data?.localStorage ? data.data : data;
+      }
+
+      function sxiphoneStores(rawData) {
+        const data = sxiphoneData(rawData) || {};
+        const parse = (value) => {
+          if (typeof value !== "string") return value;
+          try { return JSON.parse(value); } catch { return value; }
+        };
+        const persisted = parse(data.persistedData) ||
+          parse(data.localforage?.sx_app_persisted_data) || data.localforage || {};
+        const read = (key) => {
+          for (const store of [persisted, data.keyValue, data.localforage, data.localStorage]) {
+            if (store?.[key] !== undefined) return parse(store[key]);
+          }
+        };
+        return { data, persisted, read };
+      }
+
+      function isSxiphoneBackup(rawData) {
+        if (!rawData || typeof rawData !== "object") return false;
+        const { data, persisted } = sxiphoneStores(rawData);
+        return Boolean(
+          (Array.isArray(data.chatSessions) && (data.keyValue || data.localStorage || data.persistedData)) ||
+          [persisted, data.keyValue, data.localStorage].some((store) => store && typeof store === "object" &&
+            ["sx_characters", "sx_chat_sessions", "sx_char_name", "sx_users"].some((key) => key in store)) ||
+          (rawData.version === "3.0-minimal" && data.localStorage?.characters));
       }
 
       function isYuanUwuBackup(data) {
@@ -1139,6 +1173,7 @@
 
         try {
           const data = JSON.parse(text);
+          if (isSxiphoneBackup(data)) return { format: "sxiphone", sourceLabel: "SxiPhone 小手机", data };
           if (is1900UwuBackup(data)) return { format: "1900uwu", sourceLabel: "1900版uwu (章鱼喷墨)", data };
           if (isOctopusBackup(data)) return { format: "octopus", sourceLabel: "章鱼机", data };
           if (isNuojijiBackup(data)) return { ...nuojijiSource(data), data };
@@ -1150,7 +1185,7 @@
         } catch (error) {
           throw new Error("文件不是有效的 JSON 备份，或文件内容已损坏。");
         }
-        throw new Error("未识别此备份格式。请选择糯叽机、章鱼机、330/兔k机、zz、弯弯、Float、Chill、糯米机、yuan改uwu、1900版uwu 或 miya小手机的原生备份文件。");
+        throw new Error("未识别此备份格式。请选择糯叽机、章鱼机、330/兔k机、zz、弯弯、Float、Chill、SxiPhone、糯米机、yuan改uwu、1900版uwu 或 miya小手机的原生备份文件。");
       }
 
       function sourceData(data) {
@@ -2226,6 +2261,145 @@
       // 记忆不挂在聊天上、需要单独搬运的源格式。
       const MEMORY_EXTERNAL_SOURCES = new Set(["sully-hand", "sully-csy", "float", "nuojiji"]);
 
+      const SXIPHONE_WORLDBOOK_CATEGORIES = ["core", "theater", "conditional", "cot", "style", "global", "keywords", "backend"];
+
+      function sxiphoneWorldbookEntries(value) {
+        if (!value || typeof value !== "object") return [];
+        if (typeof value.content === "string") return [value];
+        return Object.values(value).flatMap(sxiphoneWorldbookEntries);
+      }
+
+      function sxiphoneToEphone(rawData) {
+        const { data, persisted, read } = sxiphoneStores(rawData);
+        const firstList = (...lists) => lists.find((list) => Array.isArray(list) && list.length) || [];
+        const characters = firstList(read("sx_characters"), data.charList, data.characters, read("characters"));
+        const users = firstList(read("sx_users"), data.userList, read("users"));
+        const sessions = firstList(persisted.sx_chat_sessions, data.chatSessions, read("sx_chat_sessions"));
+        const defaultUser = {
+          name: persisted.userName || read("sx_user_name") || read("userName") || "我",
+          avatar: persisted.userAvatar || read("sx_user_avatar") || "",
+          personality: persisted.userPersonality || read("sx_user_personality") || "",
+          background: persisted.userBackground || read("sx_user_background") || "",
+        };
+        const worldBooks = SXIPHONE_WORLDBOOK_CATEGORIES.flatMap((category) =>
+          sxiphoneWorldbookEntries(read(`sx_worldbook_${category}`)).map((entry, index) => ({
+            id: `${category}_${index}_${entry.title}`,
+            name: entry.title || `世界书 ${index + 1}`,
+            category,
+            content: [{
+              keys: asArray(entry.triggers), content: entry.content || "",
+              enabled: entry.enabled !== false,
+            }],
+          })));
+        const matched = new Set();
+        const rows = sessions.map((session) => {
+          const character = characters.find((char) =>
+            (session.charId != null && String(char.id) === String(session.charId)) ||
+            char.name === session.charName);
+          if (character) matched.add(character);
+          return { session, character: character || {} };
+        });
+        characters.filter((char) => !matched.has(char)).forEach((character) => rows.push({ session: {}, character }));
+        if (!rows.length && (persisted.charName || read("sx_char_name"))) {
+          rows.push({ session: {}, character: {
+            name: persisted.charName || read("sx_char_name"),
+            avatar: persisted.charAvatar || read("sx_char_avatar"),
+            personality: persisted.charPersonality || read("sx_char_personality"),
+            background: persisted.charBackground || read("sx_char_background"),
+          } });
+        }
+        const chats = rows.map(({ session, character }, index) => {
+          const user = users.find((item) => String(item.id || item.name) === String(character.boundUserId)) || defaultUser;
+          const mounts = Array.isArray(session.worldbookMounts) ? session.worldbookMounts : read("sx_worldbook_mounts");
+          const persona = [session.charPersonality || character.personality, session.charBackground || character.background]
+            .filter(Boolean).join("\n\n");
+          const chat = toEphoneChat({
+            id: String(session.id || character.id || `sx_char_${index + 1}`),
+            name: session.charName || character.name || session.title,
+            avatar: session.charAvatar || character.avatar || "",
+            persona,
+            myPersona: [user.personality, user.background].filter(Boolean).join("\n\n"),
+            myAvatar: session.userAvatar || user.avatar || "",
+            history: asArray(session.history),
+            worldBookIds: worldBooks.filter((book) =>
+              asArray(mounts).find((mount) => mount.name === book.name)?.enabled ??
+              (book.category === "global" || book.category === "core")).map((book) => book.id),
+          }, false);
+          chat.myName = session.userName || user.name || "我";
+          return chat;
+        });
+        return {
+          version: 3, timestamp: Date.now(),
+          data: {
+            chats, worldBooks,
+            userStickers: normalizeStickerList(read("sx_emoji_packs")),
+            apiConfig: [],
+            globalSettings: [{ name: defaultUser.name, avatar: defaultUser.avatar,
+              bio: [defaultUser.personality, defaultUser.background].filter(Boolean).join("\n\n") }],
+          },
+        };
+      }
+
+      function toSxiphoneBackup(sourceFormat, rawData) {
+        const data = toEphoneCompatible(sourceFormat, rawData).data;
+        const chats = asArray(data.chats).filter((chat) => !chat.isGroup);
+        if (!chats.length) throw new Error("SxiPhone 只支持私聊；此备份没有可迁移的私聊角色。");
+        const global = firstRecord(data.globalSettings);
+        const worldbooks = toSullyWorldbooks(data.worldBooks).map((entry) => ({
+          title: entry.title, content: entry.content, triggers: entry.key, enabled: !entry.disable,
+        }));
+        const users = chats.map((chat, index) => ({
+          id: `sx_user_${index + 1}`, name: chat.myName || global.name || "我",
+          avatar: chat.settings?.myAvatar || chat.settings?.["my-avatar"] || global.avatar || "",
+          personality: chat.settings?.myPersona || chat.settings?.["my-persona"] || global.bio || "",
+          background: "",
+        }));
+        const characters = chats.map((chat, index) => ({
+          id: `sx_char_${index + 1}`, name: chat.name || "未命名角色",
+          avatar: chat.avatar || chat.settings?.aiAvatar || "",
+          personality: chillPersona(chat), background: "", boundUserId: users[index].id,
+        }));
+        const sessions = chats.map((chat, index) => {
+          const character = characters[index];
+          const linked = chat.settings?.linkedWorldBookIds || chat.worldBookIds || [];
+          const books = linked.length ? asArray(data.worldBooks).filter((book) => linked.includes(book.id)) : asArray(data.worldBooks);
+          const mountedTitles = new Set(toSullyWorldbooks(books).map((entry) => entry.title));
+          return {
+            id: `sx_chat_${index + 1}`, title: character.name, charName: character.name,
+            charId: character.id, charAvatar: character.avatar, charPersonality: character.personality,
+            charBackground: character.background, userName: users[index].name, userAvatar: users[index].avatar,
+            worldbookMounts: worldbooks.map((entry) => ({ name: entry.title, position: "mid", enabled: entry.enabled && mountedTitles.has(entry.title) })),
+            history: normalizeMessages(chat.history).filter((message) =>
+              (message.role === "user" || message.role === "assistant") &&
+              (!message.type || message.type === "text") && typeof message.content === "string"),
+          };
+        });
+        const values = {
+          sx_characters: characters, sx_users: users, sx_chat_sessions: sessions,
+          sx_chat_active: sessions[0].id,
+          sx_char_name: characters[0].name, sx_char_avatar: characters[0].avatar,
+          sx_char_personality: characters[0].personality, sx_char_background: "",
+          sx_user_name: users[0].name, sx_user_avatar: users[0].avatar,
+          sx_user_personality: users[0].personality, sx_user_background: "",
+          sx_worldbook_global: worldbooks.filter((entry) => !entry.triggers.length),
+          sx_worldbook_keywords: worldbooks.filter((entry) => entry.triggers.length),
+          sx_worldbook_index: worldbooks.map((entry, index) => ({ id: `imported_${index}`, title: entry.title, category: entry.triggers.length ? "keywords" : "global" })),
+          sx_worldbook_mounts: sessions[0].worldbookMounts,
+          sx_emoji_packs: extractStickers(sourceFormat, rawData),
+        };
+        const localStorage = Object.fromEntries(Object.entries(values).map(([key, value]) =>
+          [key, typeof value === "string" ? value : JSON.stringify(value)]));
+        const persistedData = {
+          ...values, userName: users[0].name, userAvatar: users[0].avatar,
+          userPersonality: users[0].personality, userBackground: "",
+          charName: characters[0].name, charAvatar: characters[0].avatar,
+          charPersonality: characters[0].personality, charBackground: "",
+        };
+        // 普通 JSON 导入读顶层；“从资料夹汇入”读 data，后者能避开普通导入覆盖世界书的问题。
+        const payload = { localStorage, persistedData, chatSessions: sessions };
+        return { version: "3.0", exportedAt: new Date().toISOString(), ...payload, data: payload };
+      }
+
       function chillMessageText(message) {
         if (typeof message?.content === "string") return message.content;
         return asArray(message?.parts)
@@ -2280,6 +2454,7 @@
       }
 
       function toEphoneCompatibleRaw(sourceFormat, rawData) {
+        if (sourceFormat === "sxiphone") return sxiphoneToEphone(rawData);
         if (sourceFormat === "chill") return chillToEphone(rawData);
         if (sourceFormat === "nuojiji") return nuojijiToEphone(rawData);
         if (sourceFormat === "wanwan") return wanwanToEphone(rawData);
@@ -2708,6 +2883,7 @@
       }
 
       function extractStickers(sourceFormat, rawData) {
+        if (sourceFormat === "sxiphone") return normalizeStickerList(sxiphoneStores(rawData).read("sx_emoji_packs"));
         if (sourceFormat === "float") return floatStickersToNormalized(rawData);
         if (sourceFormat === "nuojiji") return nuojijiStickersToNormalized(rawData);
         if (sourceFormat === "sully-hand" || sourceFormat === "sully-csy") {
@@ -3974,6 +4150,7 @@
       }
 
       function collectStats(format, data) {
+        if (format === "sxiphone") return collectStats("ephone", sxiphoneToEphone(data));
         if (format === "chill") {
           return {
             characters: asArray(data.characters).length,
@@ -4079,7 +4256,7 @@
       function targetSupportsNuojiji(target) {
         // 弯弯与 Float 都从 ephone 中间格式生成，糯叽机已有对应的规范化路径。
         // yuan改uwu / 1900版uwu / miya 同样只依赖这条路径，所以一并放行。
-        return ["ephone", "octopus", "nuojiji", "wanwan", "float", "yuanuwu", "1900uwu", "miya", "chill"].includes(target);
+        return ["ephone", "octopus", "nuojiji", "wanwan", "float", "yuanuwu", "1900uwu", "miya", "chill", "sxiphone"].includes(target);
       }
 
       async function gzipJson(data) {
@@ -4201,6 +4378,11 @@
           } else if (target === "chill") {
             const blob = await toChillBackup(source.format, source.data);
             showSuccess(source.sourceLabel, "Chill 小手机", stats, blob, `chill-converted-backup-${date}.zip`);
+          } else if (target === "sxiphone") {
+            const output = toSxiphoneBackup(source.format, source.data);
+            const blob = new Blob([JSON.stringify(output)], { type: "application/json" });
+            showSuccess(source.sourceLabel, "SxiPhone 小手机", collectStats("sxiphone", output), blob, `sxiphone-converted-backup-${date}.json`);
+            document.getElementById("result-details").textContent = "迁移角色、人设、普通私聊文本、头像、用户身份、世界书与表情；不迁移群聊、长期记忆、API 配置或专属应用数据。为保留世界书，请在 SxiPhone 设置 → 本地文件夹 → 从资料夹汇入，选择此 JSON 后刷新。普通备份导入可恢复角色和聊天，但会被目标页面覆盖世界书。";
           } else {
             const output = toSullyBackup(target, source.format, source.data, options);
             const blob = new Blob([JSON.stringify(output, null, 2)], { type: "application/json" });

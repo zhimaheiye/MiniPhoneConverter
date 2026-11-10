@@ -645,6 +645,104 @@ assert.equal(chillEphone.chats[0].settings.aiPersona, '温柔');
 assert.equal(chillEphone.chats[0].customQ1, '最喜欢什么？');
 assert.equal(chillEphone.chats[0].history[1].recallThought, '撤回原因');
 
+// SxiPhone 的聊天页优先读 persistedData；其他存储里可以同时留有过期副本。
+const sxSession = {
+  id: 'sx-session', charName: '小星', charPersonality: '温柔', charBackground: '天空城居民',
+  charAvatar: 'data:image/png;base64,AQIDBA==',
+  worldbookMounts: [{ name: '城市', enabled: true }, { name: '停用', enabled: false }],
+  history: [{ role: 'user', content: '你好', timestamp: 100 }, { role: 'assistant', content: '你好呀', timestamp: 101 }],
+};
+const sxNative = {
+  version: '3.0', exportedAt: '2026-11-10T00:00:00Z',
+  chatSessions: [{ ...sxSession, history: [] }], characters: [], keyValue: {},
+  localStorage: { sx_characters: '[]', sx_chat_sessions: '[]' },
+  persistedData: {
+    sx_chat_sessions: [sxSession],
+    sx_characters: [
+      { id: 'char-star', name: '小星', personality: '旧设定', boundUserId: 'user-1' },
+      { id: 'char-moon', name: '小月', personality: '安静' },
+    ],
+    sx_users: [{ id: 'user-1', name: '小白', personality: '旅行者', avatar: 'user.png' }],
+    userName: '默认用户',
+    sx_worldbook_global: [{ title: '城市', content: '天空城', triggers: ['城'], enabled: true }],
+    sx_worldbook_keywords: [{ title: '停用', content: '未启用内容', triggers: ['月'], enabled: false }],
+    sx_emoji_packs: [{ name: '笑', url: 'smile.png' }],
+  },
+};
+const sxRead = await context.readBackup({ name: 'sxiphone-backup.json', text: async () => JSON.stringify(sxNative) });
+assert.equal(sxRead.format, 'sxiphone');
+const sxCommon = context.toEphoneCompatible(sxRead.format, sxRead.data).data;
+assert.equal(sxCommon.chats.length, 2, '存储副本不能重复生成会话，无会话角色也要保留');
+assert.equal(sxCommon.chats[0].history.length, 2, '应使用聊天页实际读取的 persistedData 会话');
+assert.equal(sxCommon.chats[0].history[1].timestamp, 101);
+assert.equal(sxCommon.chats[0].settings.aiPersona, '温柔\n\n天空城居民');
+assert.equal(sxCommon.chats[0].myName, '小白');
+assert.equal(sxCommon.chats[0].settings.myPersona, '旅行者');
+assert.equal(sxCommon.chats[0].avatar, sxSession.charAvatar);
+assert.equal(sxCommon.chats[0].settings.linkedWorldBookIds.length, 1);
+assert.equal(sxCommon.worldBooks[1].content[0].enabled, false);
+assert.equal(context.extractStickers('sxiphone', sxNative)[0].name, '笑');
+assert.equal(context.collectStats('sxiphone', sxNative).messages, 2);
+assert.equal(context.toYuanUwuBackup('sxiphone', sxNative).chats.length, 2);
+assert.equal(context.to1900UwuBackup('sxiphone', sxNative).characters.length, 2);
+assert.ok((await context.toMiyaBackup('sxiphone', sxNative)).size > 0);
+for (const variant of [
+  { version: '3.0', data: sxNative },
+  { version: '3.0', localforage: sxNative.persistedData },
+  { version: '3.0', localforage: { sx_app_persisted_data: sxNative.persistedData } },
+  { version: '3.0', localStorage: { sx_chat_sessions: JSON.stringify([sxSession]) } },
+  { version: '3.0', keyValue: { sx_chat_sessions: [sxSession] } },
+]) {
+  assert.equal(context.isSxiphoneBackup(variant), true);
+  assert.equal(context.toEphoneCompatible('sxiphone', variant).data.chats[0].history.length, 2);
+}
+const sxMinimal = { version: '3.0-minimal', data: { localStorage: {
+  characters: JSON.stringify([{ name: '最小角色', personality: '人设' }]),
+}, localforage: {} } };
+assert.equal(context.isSxiphoneBackup(sxMinimal), true);
+assert.equal(context.toEphoneCompatible('sxiphone', sxMinimal).data.chats[0].name, '最小角色');
+for (const other of [ephone, hand, wanwan, { version: '3.0', localStorage: {} }, { localforage: 'invalid' }]) {
+  assert.equal(context.isSxiphoneBackup(other), false, '其他格式不能被识别成 SxiPhone');
+}
+const sxExport = context.toSxiphoneBackup('ephone', ephone);
+assert.equal(sxExport.chatSessions.length, 1, 'SxiPhone 不能把群聊当作私聊');
+assert.equal(sxExport.chatSessions[0].history.length, 2);
+assert.equal(sxExport.chatSessions[0].history[1].timestamp, 11);
+assert.equal(sxExport.persistedData.sx_characters[0].personality, '温柔');
+assert.equal(sxExport.persistedData.sx_worldbook_keywords[0].content, '天空城');
+assert.equal(sxExport.chatSessions[0].worldbookMounts[0].name, sxExport.persistedData.sx_worldbook_keywords[0].title);
+assert.equal(sxExport.persistedData.sx_chat_active, sxExport.chatSessions[0].id);
+assert.equal(JSON.parse(sxExport.localStorage.sx_users)[0].personality, '用户设定');
+assert.ok(sxExport.data.persistedData, '从资料夹汇入读取 data 容器');
+assert.throws(() => context.toSxiphoneBackup('ephone', { version: 3, data: { chats: [ephone.data.chats[1]] } }), /没有可迁移/);
+const sxNoMedia = context.toSxiphoneBackup('ephone', { version: 3, data: { chats: [{
+  ...ephone.data.chats[0], history: [
+    { role: 'assistant', type: 'image', content: 'image.png' },
+    { role: 'user', content: '保留文本' },
+  ],
+}] } });
+assert.equal(sxNoMedia.chatSessions[0].history.length, 1, '特殊消息不能冒充普通文本');
+const sxNested = context.sxiphoneToEphone({ version: '3.0', localStorage: {
+  sx_char_name: '嵌套世界书角色',
+  sx_worldbook_core: { sx_worldbook_core: [{ title: '核心设定', content: '背景', enabled: true }] },
+  sx_worldbook_conditional: { model_protocols: { entries: [{ title: '条件设定', content: '条件正文', triggers: ['触发'], enabled: true }] } },
+} }).data;
+assert.equal(sxNested.worldBooks.length, 2, '新架构嵌套世界书不能漏读');
+assert.equal(sxNested.chats[0].settings.linkedWorldBookIds.length, 1, '核心设定默认挂载，条件设定不能自动挂载');
+const sxScoped = context.toSxiphoneBackup('ephone', { version: 3, data: {
+  chats: [{ ...ephone.data.chats[0], settings: { linkedWorldBookIds: ['bound'] } }],
+  worldBooks: [
+    { id: 'bound', name: '绑定世界书', content: '当前角色设定' },
+    { id: 'other', name: '其他角色世界书', content: '不应注入' },
+  ],
+} });
+assert.equal(sxScoped.chatSessions[0].worldbookMounts[0].enabled, true);
+assert.equal(sxScoped.chatSessions[0].worldbookMounts[1].enabled, false, '未绑定的全局条目必须显式停用');
+assert.equal(context.toEphoneCompatible('sxiphone', sxScoped).data.chats[0].settings.linkedWorldBookIds.length, 1);
+const sxStickerRoundtrip = context.toSxiphoneBackup('sxiphone', sxNative);
+assert.equal(JSON.parse(sxStickerRoundtrip.localStorage.sx_emoji_packs)[0].url, 'smile.png');
+assert.equal(sxStickerRoundtrip.persistedData.sx_worldbook_keywords[1].enabled, false);
+
 const sources = {
   ephone,
   octopus: octopusSource,
@@ -655,6 +753,7 @@ const sources = {
   wanwan,
   float: floatData,
   chill: chillRead.data,
+  sxiphone: sxNative,
 };
 
 // 每种源格式转成弯弯与 Float
@@ -682,10 +781,16 @@ for (const [format, data] of Object.entries(sources)) {
   });
   assert.equal(convertedChill.format, 'chill', `${format} → Chill 输出不合法`);
   assert.ok(convertedChill.data.characters.length > 0, `${format} → Chill 一个角色都没有`);
+  const sxOutput = context.toSxiphoneBackup(format, data);
+  const detectedSx = await context.readBackup({ name: `${format}-sxiphone.json`, text: async () => JSON.stringify(sxOutput) });
+  assert.equal(detectedSx.format, 'sxiphone');
+  const restoredSx = context.toEphoneCompatible('sxiphone', sxOutput).data;
+  assert.ok(restoredSx.chats.length > 0, `${format} → SxiPhone 一个角色都没有`);
+  assert.ok(restoredSx.chats.some((chat) => chat.history.length > 0), `${format} → SxiPhone 没有聊天记录`);
 }
 
 // 弯弯与 Float 转成其余每种格式
-for (const [format, data] of [['wanwan', wanwan], ['float', floatData], ['chill', chillRead.data]]) {
+for (const [format, data] of [['wanwan', wanwan], ['float', floatData], ['chill', chillRead.data], ['sxiphone', sxNative]]) {
   const asOctopus = context.toOctopusBackup(format, data);
   assert.ok(asOctopus.characters.length + asOctopus.groups.length > 0, `${format} → 章鱼机 为空`);
 
@@ -892,6 +997,8 @@ for (const [format, data] of Object.entries(newSources)) {
   });
   assert.equal(asChill.format, 'chill', `${format} → Chill 输出不合法`);
   assert.ok(asChill.data.characters.length > 0, `${format} → Chill 为空`);
+  const asSx = context.toSxiphoneBackup(format, data);
+  assert.ok(asSx.chatSessions.length > 0, `${format} → SxiPhone 为空`);
 }
 
 // ===== 记忆迁移 =====
