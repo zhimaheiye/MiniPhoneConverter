@@ -14,6 +14,7 @@
 - 弯弯小手机导出的 JSON 完整备份（`appName: "弯弯"`）。
 - Float 小手机导出的 ZIP 备份（`manifest.json` + `modules/`）。ZIP 内 `media/` 里的图片会在转换时自动还原。
 - [SxiPhone 小手机](https://siixii00.github.io/sxiphone00/) 的 JSON 备份：普通导出、完整备份、SXStorage 原生备份，以及最小备份中的角色。支持从 `persistedData`、`chatSessions`、`keyValue`、`localforage` 或 `localStorage` 读取通用数据。
+- [Perigee OS](https://mitsukililia.github.io/perigee-os-public-version/) 的完整 JSON 备份、LINE 聊天分板块备份和世界书分板块备份。
 
 输出规则：
 
@@ -27,6 +28,13 @@
 - 目标为“Float 小手机”时生成 Float 原生 ZIP，可在“数据管理 → 导入备份”中导入。聊天、角色卡、设置分属三个模块，按模块勾选导入时三个都要勾上才完整。
 - 目标为“Chill 小手机”时生成 Chill v11 原生精简 ZIP。角色、人设、普通私聊文本和可内嵌头像会迁移；目标现有面具在首次打开聊天时选择。Chill 来源也可以转换到其他已支持的小手机。
 - 目标为“SxiPhone 小手机”时生成原生 JSON，迁移角色、人设、普通私聊文本、头像、用户身份、世界书与表情。群聊、长期记忆、API 配置及专属应用数据不迁移；仅含群聊的备份会明确报错。
+- 目标为“Perigee OS”时生成原生 JSON，迁移角色、人设、私聊、群聊及成员关联、文本和图片消息、图片表情、世界书与用户身份。长期记忆（包括总结消息）、语音、转账、API 配置、放送局及各平台专属数据不迁移。
+
+### Perigee OS 导入说明
+
+在 Perigee OS 设置的导入入口选择转换后的 JSON，勾选 **LINE 聊天、世界书、个人身份资料**，确认后由目标页面保存并刷新。转换文件只包含这些板块，目标其他板块保留原值。
+
+Perigee OS 每个角色只能直接绑定一本世界书：源角色绑定多本时，转换器额外生成一本合并书供该角色绑定，原世界书仍保留在列表中。条目关键词和开关会保留。用户显示身份采用首个私聊身份，其他会话的用户人设写入该身份对各角色的绑定。官方 NPC 好友会从放送局读取人设并转成普通角色，不搬迁放送局本身。
 
 ### SxiPhone 导入说明
 

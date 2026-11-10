@@ -743,6 +743,97 @@ const sxStickerRoundtrip = context.toSxiphoneBackup('sxiphone', sxNative);
 assert.equal(JSON.parse(sxStickerRoundtrip.localStorage.sx_emoji_packs)[0].url, 'smile.png');
 assert.equal(sxStickerRoundtrip.persistedData.sx_worldbook_keywords[1].enabled, false);
 
+const perigeeNative = {
+  characters: [
+    { id: 'p1', name: '星', avatar: 'star.png', personality: '温柔', worldBookId: 'pwb' },
+    { id: 'p2', name: '月', personality: '冷静' },
+  ],
+  groups: [{ id: 'pg', name: '夜聊', memberIds: ['p1', 'p2'] }],
+  conversations: {
+    p1: [
+      { id: 'pmsg1', role: 'user', type: 'text', content: '你好', timestamp: 100 },
+      { id: 'pmsg2', role: 'assistant', type: 'text', content: '晚安', timestamp: 101 },
+      { role: 'user', type: 'image', content: 'photo.png', timestamp: 102 },
+      { role: 'assistant', type: 'sticker', content: 'https://example.test/sticker.png', timestamp: 103 },
+      { role: 'system', type: 'text', isSummary: true, content: '长期总结', timestamp: 104 },
+      { role: 'user', type: 'voice', content: '语音', timestamp: 105 },
+    ],
+    p2: [],
+    grp_pg: [{ role: 'assistant', charId: 'p2', type: 'text', content: '群里见', timestamp: 110 }],
+  },
+  chatMeta: { p1: { isPinned: true }, grp_pg: { isPinned: true } },
+  worldBooks: [{ id: 'pwb', name: '夜空', entries: [
+    { id: 'pe1', title: '城市', keys: ['城'], content: '天空城', enabled: true },
+    { id: 'pe2', title: '停用设定', keys: [], content: '未启用', enabled: false },
+  ] }],
+  myPersonaPresets: [{ id: 'pu', name: '旅行者', avatar: 'user.png', persona: '基础人设',
+    bindings: { p1: { extraPersona: '补充设定', override: false }, p2: { extraPersona: '覆盖设定', override: true } },
+  }],
+  activePersonaId: 'pu',
+  stickerData: { packs: [{ id: 'pack', name: '我的表情' }], stickers: [
+    { id: 'ps', name: '笑', type: 'image', data: 'https://example.test/sticker.png', packId: 'pack' },
+    { id: 'unicode', type: 'emoji', data: '😀', packId: 'pack' },
+  ], recentIds: [] },
+};
+const perigeeRead = await context.readBackup({ name: 'perigee-os-full.json', text: async () => JSON.stringify(perigeeNative) });
+assert.equal(perigeeRead.format, 'perigee');
+const perigeeCommon = context.toEphoneCompatible('perigee', perigeeNative).data;
+assert.equal(perigeeCommon.chats.length, 3);
+assert.equal(perigeeCommon.chats[0].history.length, 4, '总结与语音不能变成普通聊天气泡');
+assert.equal(perigeeCommon.chats[0].history[2].type, 'image');
+assert.equal(perigeeCommon.chats[0].history[3].type, 'emoji');
+assert.equal(perigeeCommon.chats[0].settings.myPersona, '基础人设\n\n补充设定');
+assert.equal(perigeeCommon.chats[1].settings.myPersona, '覆盖设定');
+assert.equal(perigeeCommon.chats[0].myName, '旅行者');
+assert.equal(perigeeCommon.chats[0].settings.linkedWorldBookIds[0], 'pwb');
+assert.equal(perigeeCommon.chats[2].id, 'grp_pg');
+assert.equal(perigeeCommon.chats[2].members[1].name, '月');
+assert.equal(perigeeCommon.chats[2].members[0].history, undefined, '群成员资料不能重复携带完整私聊记录');
+assert.equal(perigeeCommon.chats[2].history[0].charId, 'p2');
+assert.equal(perigeeCommon.chats[2].isPinned, true);
+assert.equal(perigeeCommon.worldBooks[0].content[1].enabled, false);
+assert.equal(perigeeCommon.userStickers.length, 1, '纯 Unicode 表情不能作为图片表情导出');
+assert.equal(context.collectStats('perigee', perigeeNative).groups, 1);
+assert.equal(context.toYuanUwuBackup('perigee', perigeeNative).chats.length, 3);
+assert.equal(context.to1900UwuBackup('perigee', perigeeNative).groups.length, 1);
+assert.ok((await context.toMiyaBackup('perigee', perigeeNative)).size > 0);
+assert.equal(context.isPerigeeBackup({ worldBooks: perigeeNative.worldBooks }), true);
+for (const other of [ephone, sxNative, hand, wanwan, octopusSource, { conversations: [] }]) {
+  assert.equal(context.isPerigeeBackup(other), false);
+}
+const perigeeRoundtrip = context.toPerigeeBackup('perigee', perigeeNative);
+const perigeeGroup = perigeeRoundtrip.groups[0];
+assert.equal(perigeeRoundtrip.characters.length, 2, '群成员应复用私聊角色');
+assert.equal(perigeeRoundtrip.conversations['grp_' + perigeeGroup.id][0].charId, perigeeRoundtrip.characters[1].id);
+assert.deepEqual([...perigeeGroup.memberIds], [...perigeeRoundtrip.characters].map((char) => char.id));
+assert.equal(perigeeRoundtrip.worldBooks[0].entries[1].enabled, false);
+assert.equal(perigeeRoundtrip.conversations[perigeeRoundtrip.characters[0].id][3].type, 'sticker');
+assert.equal(perigeeRoundtrip.stickerData.stickers[0].data, 'https://example.test/sticker.png');
+assert.equal(perigeeRoundtrip.apiConfig, undefined, '不能覆盖目标已有 API 配置');
+assert.equal(perigeeRoundtrip.broadcast, undefined, '不能覆盖目标放送局');
+const perigeeMultiBook = context.toPerigeeBackup('ephone', { version: 3, data: {
+  chats: [{ ...ephone.data.chats[0], settings: { linkedWorldBookIds: ['one', 'two'] } }],
+  worldBooks: [{ id: 'one', name: '一', content: '正文一' }, { id: 'two', name: '二', content: '正文二' }],
+} });
+const mergedBook = perigeeMultiBook.worldBooks.find((book) => book.id === perigeeMultiBook.characters[0].worldBookId);
+assert.equal(perigeeMultiBook.worldBooks.length, 3);
+assert.equal(mergedBook.entries.length, 2);
+const officialPerigee = context.perigeeToEphone({ characters: [
+  { id: 'staff', name: '导演', personality: '过期人设', sourceType: 'official-npc', sourceNpcId: 'npc' },
+], conversations: {}, activePersonaId: 'officialnpc:npc', broadcast: { officialNpcs: [
+  { id: 'npc', name: '导演', persona: '当前官方人设', avatarImage: 'npc.png' },
+] } }).data;
+assert.equal(officialPerigee.chats[0].settings.aiPersona, '当前官方人设');
+assert.equal(officialPerigee.chats[0].settings.myPersona, '当前官方人设');
+assert.equal(officialPerigee.globalSettings[0].avatar, 'npc.png');
+const perigeeEmbedded = context.toPerigeeBackup('ephone', { version: 3, data: { chats: [{
+  id: 'group-only', name: '内嵌成员群', isGroup: true,
+  members: [{ id: 'embedded', name: '内嵌角色', settings: { aiPersona: '内嵌人设' } }],
+  history: [{ role: 'assistant', type: 'text', charId: 'embedded', content: '你好', timestamp: 123 }],
+}] } });
+assert.equal(perigeeEmbedded.characters[0].personality, '内嵌人设');
+assert.equal(perigeeEmbedded.conversations['grp_' + perigeeEmbedded.groups[0].id][0].charId, perigeeEmbedded.characters[0].id);
+
 const sources = {
   ephone,
   octopus: octopusSource,
@@ -754,6 +845,7 @@ const sources = {
   float: floatData,
   chill: chillRead.data,
   sxiphone: sxNative,
+  perigee: perigeeNative,
 };
 
 // 每种源格式转成弯弯与 Float
@@ -787,10 +879,15 @@ for (const [format, data] of Object.entries(sources)) {
   const restoredSx = context.toEphoneCompatible('sxiphone', sxOutput).data;
   assert.ok(restoredSx.chats.length > 0, `${format} → SxiPhone 一个角色都没有`);
   assert.ok(restoredSx.chats.some((chat) => chat.history.length > 0), `${format} → SxiPhone 没有聊天记录`);
+  const perigeeOutput = context.toPerigeeBackup(format, data);
+  assert.ok(perigeeOutput.characters.length > 0, `${format} → Perigee 没有角色`);
+  assert.ok(Object.values(perigeeOutput.conversations).some((history) => history.length > 0), `${format} → Perigee 没有消息`);
+  const detectedPerigee = await context.readBackup({ name: `${format}-perigee.json`, text: async () => JSON.stringify(perigeeOutput) });
+  assert.equal(detectedPerigee.format, 'perigee');
 }
 
 // 弯弯与 Float 转成其余每种格式
-for (const [format, data] of [['wanwan', wanwan], ['float', floatData], ['chill', chillRead.data], ['sxiphone', sxNative]]) {
+for (const [format, data] of [['wanwan', wanwan], ['float', floatData], ['chill', chillRead.data], ['sxiphone', sxNative], ['perigee', perigeeNative]]) {
   const asOctopus = context.toOctopusBackup(format, data);
   assert.ok(asOctopus.characters.length + asOctopus.groups.length > 0, `${format} → 章鱼机 为空`);
 
@@ -999,6 +1096,8 @@ for (const [format, data] of Object.entries(newSources)) {
   assert.ok(asChill.data.characters.length > 0, `${format} → Chill 为空`);
   const asSx = context.toSxiphoneBackup(format, data);
   assert.ok(asSx.chatSessions.length > 0, `${format} → SxiPhone 为空`);
+  const asPerigee = context.toPerigeeBackup(format, data);
+  assert.ok(asPerigee.characters.length > 0, `${format} → Perigee 为空`);
 }
 
 // ===== 记忆迁移 =====
