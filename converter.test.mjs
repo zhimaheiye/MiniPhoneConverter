@@ -834,6 +834,89 @@ const perigeeEmbedded = context.toPerigeeBackup('ephone', { version: 3, data: { 
 assert.equal(perigeeEmbedded.characters[0].personality, '内嵌人设');
 assert.equal(perigeeEmbedded.conversations['grp_' + perigeeEmbedded.groups[0].id][0].charId, perigeeEmbedded.characters[0].id);
 
+const dsjNative = { _dsj: 1, app: '淡水机', data: {
+  wx: { id: 'local', nick: '默认用户', av: 'user.png', sig: '默认身份' },
+  ct: [
+    { id: 'dc1', name: '星', remark: '小星', av: 'star.png', persona: '温柔', mask: 'dm1' },
+    { id: 'dc2', name: '月', persona: '冷静' },
+  ], gr: [{ id: 'dg1', name: '星月群', m: ['dc1', 'dc2'] }],
+  ch: {
+    dc1: [
+      { r: 'u', t: '你好', ts: 100 }, { r: 'a', t: '晚安', ts: 101 },
+      { r: 'u', k: 'img', u: 'photo.png', t: '[图片]', ts: 102 },
+      { r: 'a', k: 'stk', u: 'https://example.test/sticker.png', t: '[表情包]', ts: 103 },
+      { r: 'a', ph: 1, t: '…' }, { r: 'u', k: 'vo', t: '语音' }, { r: 'u', k: 'pat', t: '拍一拍' },
+    ],
+    dg1: [{ r: 'a', n: '月', t: '群里见', ts: 110 }],
+  },
+  cs: { dc1: { pin: true, sys: '补充设定', ctx: 30, wbOnly: true } },
+  masks: [{ id: 'dm1', name: '旅行者', desc: '旅行人设', av: 'traveler.png' }], maskDef: '',
+  wb: [
+    { title: '专属世界书', keys: '城，天空', content: '天空城', on: true, bind: ['dc1'] },
+    { title: '全局设定', keys: '', constant: true, content: '全局背景', on: true },
+    { title: '停用条目', content: '不启用', on: false },
+  ], stk: ['https://example.test/sticker.png'],
+} };
+const dsjRead = await context.readBackup({ name: '淡水机-backup.json', text: async () => JSON.stringify(dsjNative) });
+assert.equal(dsjRead.format, 'danshuiji');
+assert.equal(context.isDanshuijiBackup(dsjNative.data), true, '兼容旧版无包裹备份');
+const dsjCommon = context.toEphoneCompatible('danshuiji', dsjNative).data;
+assert.equal(dsjCommon.chats.length, 3);
+assert.equal(dsjCommon.chats[0].name, '小星');
+assert.equal(dsjCommon.chats[0].realName, '星');
+assert.equal(dsjCommon.chats[0].settings.aiPersona, '温柔\n\n补充设定');
+assert.equal(dsjCommon.chats[0].myName, '旅行者');
+assert.equal(dsjCommon.chats[0].settings.myPersona, '旅行人设');
+assert.equal(dsjCommon.chats[0].isPinned, true);
+assert.equal(dsjCommon.chats[0].settings.maxMemory, 30);
+assert.equal(dsjCommon.chats[0].history.length, 4, '生成占位符、语音和拍一拍不能冒充普通消息');
+assert.equal(dsjCommon.chats[0].history[2].content, 'photo.png');
+assert.equal(dsjCommon.chats[0].history[3].type, 'emoji');
+assert.equal(dsjCommon.chats[0].settings.linkedWorldBookIds.length, 1);
+assert.equal(dsjCommon.chats[2].history[0].charId, 'dc2');
+assert.equal(dsjCommon.chats[2].members[0].name, '星');
+assert.equal(dsjCommon.chats[2].members[0].history, undefined);
+assert.equal(dsjCommon.worldBooks[0].content[0].keys.length, 2);
+assert.equal(dsjCommon.worldBooks[2].content[0].enabled, false);
+assert.equal(context.collectStats('danshuiji', dsjNative).messages, 5);
+assert.equal(context.extractStickers('danshuiji', dsjNative)[0].url, dsjNative.data.stk[0]);
+for (const other of [ephone, perigeeNative, sxNative, hand, wanwan, { _dsj: 1, data: [] }, { ct: [], ch: [] }]) {
+  assert.equal(context.isDanshuijiBackup(other), false);
+}
+const dsjRoundtrip = context.toDanshuijiBackup('danshuiji', dsjNative);
+const dsjOut = dsjRoundtrip.data;
+assert.equal(dsjRoundtrip._dsj, 1);
+assert.equal(dsjOut.ct.length, 2, '群聊成员应复用私聊角色');
+assert.equal(dsjOut.ct[0].name, '星');
+assert.equal(dsjOut.ct[0].remark, '小星');
+assert.equal(dsjOut.gr[0].m[1], dsjOut.ct[1].id);
+assert.equal(dsjOut.ch[dsjOut.gr[0].id][0].n, '月');
+assert.equal(dsjOut.ch[dsjOut.ct[0].id][3].u, dsjNative.data.stk[0]);
+assert.equal(dsjOut.cs[dsjOut.ct[0].id].pin, true);
+assert.equal(dsjOut.wb[0].bind[0], dsjOut.ct[0].id);
+assert.equal(dsjOut.wb[2].on, false);
+assert.equal(dsjOut.masks.find((mask) => mask.id === dsjOut.ct[0].mask).desc, '旅行人设');
+assert.equal(dsjOut.masks.find((mask) => mask.id === dsjOut.maskDef).name, '默认用户');
+assert.equal(dsjOut.main, undefined);
+assert.equal(dsjOut.sms, undefined);
+assert.equal(context.toYuanUwuBackup('danshuiji', dsjNative).chats.length, 3);
+assert.equal(context.to1900UwuBackup('danshuiji', dsjNative).groups.length, 1);
+assert.ok((await context.toMiyaBackup('danshuiji', dsjNative)).size > 0);
+const dsjAmbiguous = JSON.parse(JSON.stringify(dsjNative));
+dsjAmbiguous.data.ct[0].name = '月';
+const unknownSpeaker = context.danshuijiToEphone(dsjAmbiguous).data.chats[2].history[0];
+assert.equal(unknownSpeaker.charId, undefined, '同名群成员不能猜测发言人');
+assert.equal(unknownSpeaker.senderName, '月');
+const dsjDisabled = JSON.parse(JSON.stringify(dsjNative));
+dsjDisabled.data.cs.dc1 = { wb: false, wbOnly: true };
+const disabledRoundtrip = context.toDanshuijiBackup('danshuiji', dsjDisabled).data;
+assert.equal(disabledRoundtrip.cs[disabledRoundtrip.ct[0].id].wb, false);
+assert.equal(disabledRoundtrip.cs[disabledRoundtrip.ct[0].id].wbOnly, true);
+const dsjEmptyMask = JSON.parse(JSON.stringify(dsjNative));
+dsjEmptyMask.data.masks[0].desc = '';
+const emptyMaskOutput = context.toDanshuijiBackup('danshuiji', dsjEmptyMask).data;
+assert.equal(emptyMaskOutput.masks.find((mask) => mask.id === emptyMaskOutput.ct[0].mask).desc, '', '空面具不能被默认身份替换');
+
 const sources = {
   ephone,
   octopus: octopusSource,
@@ -846,6 +929,7 @@ const sources = {
   chill: chillRead.data,
   sxiphone: sxNative,
   perigee: perigeeNative,
+  danshuiji: dsjNative,
 };
 
 // 每种源格式转成弯弯与 Float
@@ -884,10 +968,14 @@ for (const [format, data] of Object.entries(sources)) {
   assert.ok(Object.values(perigeeOutput.conversations).some((history) => history.length > 0), `${format} → Perigee 没有消息`);
   const detectedPerigee = await context.readBackup({ name: `${format}-perigee.json`, text: async () => JSON.stringify(perigeeOutput) });
   assert.equal(detectedPerigee.format, 'perigee');
+  const dsjOutput = context.toDanshuijiBackup(format, data);
+  assert.ok(dsjOutput.data.ct.length > 0, `${format} → 淡水机没有角色`);
+  assert.ok(Object.values(dsjOutput.data.ch).some((history) => history.length > 0), `${format} → 淡水机没有消息`);
+  assert.equal((await context.readBackup({ name: `${format}-dsj.json`, text: async () => JSON.stringify(dsjOutput) })).format, 'danshuiji');
 }
 
 // 弯弯与 Float 转成其余每种格式
-for (const [format, data] of [['wanwan', wanwan], ['float', floatData], ['chill', chillRead.data], ['sxiphone', sxNative], ['perigee', perigeeNative]]) {
+for (const [format, data] of [['wanwan', wanwan], ['float', floatData], ['chill', chillRead.data], ['sxiphone', sxNative], ['perigee', perigeeNative], ['danshuiji', dsjNative]]) {
   const asOctopus = context.toOctopusBackup(format, data);
   assert.ok(asOctopus.characters.length + asOctopus.groups.length > 0, `${format} → 章鱼机 为空`);
 
@@ -1098,6 +1186,8 @@ for (const [format, data] of Object.entries(newSources)) {
   assert.ok(asSx.chatSessions.length > 0, `${format} → SxiPhone 为空`);
   const asPerigee = context.toPerigeeBackup(format, data);
   assert.ok(asPerigee.characters.length > 0, `${format} → Perigee 为空`);
+  const asDsj = context.toDanshuijiBackup(format, data);
+  assert.ok(asDsj.data.ct.length > 0, `${format} → 淡水机为空`);
 }
 
 // ===== 记忆迁移 =====

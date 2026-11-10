@@ -230,7 +230,7 @@
       <header>
         <div>
           <h1>小手机备份转换器</h1>
-          <p class="subtitle">在 330 / 兔k机、章鱼机、zz、弯弯、Float、糯叽机、Chill、SxiPhone、Perigee OS 与两种糯米机之间转换备份。所有处理都在当前浏览器中完成。</p>
+          <p class="subtitle">在 330 / 兔k机、章鱼机、zz、弯弯、Float、糯叽机、Chill、SxiPhone、Perigee OS、淡水机与两种糯米机之间转换备份。所有处理都在当前浏览器中完成。</p>
         </div>
         <div class="local-mark">本地离线处理</div>
       </header>
@@ -239,7 +239,7 @@
         <section class="surface" aria-label="转换设置">
           <div class="step">
             <div class="step-head"><span class="step-num">01</span><h2>选择备份文件</h2></div>
-            <p class="step-note">支持糯叽机 v5、章鱼机 `.ee`，330/兔k机、zz、弯弯、Float、Chill、SxiPhone、Perigee OS、手抓糯米机与 csy 糯米机的 JSON / ZIP 备份。</p>
+            <p class="step-note">支持糯叽机 v5、章鱼机 `.ee`，330/兔k机、zz、弯弯、Float、Chill、SxiPhone、Perigee OS、淡水机、手抓糯米机与 csy 糯米机的 JSON / ZIP 备份。</p>
             <!-- label 直接包住 input（不写 for）：两者同时存在时，点一次会在部分浏览器里
                  转发成两次点击，把文件选择框弹两遍。 -->
             <label class="dropzone" id="dropzone">
@@ -312,6 +312,10 @@
               <label class="target-option">
                 <input type="radio" name="target" value="perigee" />
                 <strong>Perigee OS</strong><span>原生 JSON · 私聊与群聊</span>
+              </label>
+              <label class="target-option">
+                <input type="radio" name="target" value="danshuiji" />
+                <strong>淡水机</strong><span>原生 JSON · 私聊与群聊</span>
               </label>
             </div>
           </div>
@@ -719,6 +723,16 @@
           (data.conversations && typeof data.conversations === "object" && !Array.isArray(data.conversations) &&
             (Array.isArray(data.characters) || Array.isArray(data.groups))) ||
           (Array.isArray(data.worldBooks) && data.worldBooks.some((book) => Array.isArray(book?.entries)))));
+      }
+
+      function isDanshuijiBackup(data) {
+        return Boolean(data && typeof data === "object" && !Array.isArray(data) && (
+          (data._dsj === 1 && data.data && typeof data.data === "object" && !Array.isArray(data.data)) ||
+          (Array.isArray(data.ct) && data.ch && typeof data.ch === "object" && !Array.isArray(data.ch))));
+      }
+
+      function danshuijiData(data) {
+        return data?._dsj === 1 ? data.data : data;
       }
 
       function sxiphoneData(data) {
@@ -1184,6 +1198,7 @@
 
         try {
           const data = JSON.parse(text);
+          if (isDanshuijiBackup(data)) return { format: "danshuiji", sourceLabel: "淡水机", data };
           if (isPerigeeBackup(data)) return { format: "perigee", sourceLabel: "Perigee OS", data };
           if (isSxiphoneBackup(data)) return { format: "sxiphone", sourceLabel: "SxiPhone 小手机", data };
           if (is1900UwuBackup(data)) return { format: "1900uwu", sourceLabel: "1900版uwu (章鱼喷墨)", data };
@@ -1197,7 +1212,7 @@
         } catch (error) {
           throw new Error("文件不是有效的 JSON 备份，或文件内容已损坏。");
         }
-        throw new Error("未识别此备份格式。请选择糯叽机、章鱼机、330/兔k机、zz、弯弯、Float、Chill、SxiPhone、Perigee OS、糯米机、yuan改uwu、1900版uwu 或 miya小手机的原生备份文件。");
+        throw new Error("未识别此备份格式。请选择糯叽机、章鱼机、330/兔k机、zz、弯弯、Float、Chill、SxiPhone、Perigee OS、淡水机、糯米机、yuan改uwu、1900版uwu 或 miya小手机的原生备份文件。");
       }
 
       function sourceData(data) {
@@ -2273,6 +2288,128 @@
       // 记忆不挂在聊天上、需要单独搬运的源格式。
       const MEMORY_EXTERNAL_SOURCES = new Set(["sully-hand", "sully-csy", "float", "nuojiji"]);
 
+      function danshuijiToEphone(rawData) {
+        const data = danshuijiData(rawData);
+        const contacts = asArray(data.ct);
+        const masks = asArray(data.masks);
+        const defaultMask = masks.find((mask) => mask.id === data.maskDef);
+        const global = { name: defaultMask?.name || data.wx?.nick || data.wx?.id || "我",
+          avatar: defaultMask?.av || data.wx?.av || "", bio: defaultMask ? defaultMask.desc || "" : data.wx?.sig || "" };
+        const worldBooks = asArray(data.wb).map((entry, index) => ({
+          id: `dsj_wb_${index + 1}`, name: entry.title || `世界书 ${index + 1}`,
+          content: [{ title: entry.title, keys: String(entry.keys || "").split(/[,，]/).map((key) => key.trim()).filter(Boolean),
+            content: entry.content || "", constant: Boolean(entry.constant), enabled: entry.on !== false }],
+        }));
+        const convertChat = (row, isGroup) => {
+          const options = data.cs?.[row.id] || {};
+          const mask = masks.find((item) => item.id === row.mask) || defaultMask;
+          const names = [row.name, row.remark].filter(Boolean).map((name) => name.toLowerCase());
+          const linked = asArray(data.wb).map((entry, index) => ({ entry, book: worldBooks[index] }))
+            .filter(({ entry }) => options.wb !== false && (asArray(entry.bind).length
+              ? entry.bind.some((id) => String(id) === String(row.id))
+              : entry.chars ? String(entry.chars).split(/[,，]/).some((name) => name.trim() &&
+                names.some((item) => item.includes(name.trim().toLowerCase()) || name.trim().toLowerCase().includes(item))) : !options.wbOnly))
+            .map(({ book }) => book.id);
+          const history = asArray(data.ch?.[row.id]).filter((message) => message && !message.ph &&
+            ["u", "a"].includes(message.r) && ["", "text", "img", "stk"].includes(message.k || ""))
+            .map((message, index) => {
+              const sender = isGroup && message.n ? contacts.filter((contact) =>
+                asArray(row.m).some((id) => String(id) === String(contact.id)) &&
+                (contact.name === message.n || contact.remark === message.n)) : [];
+              return { id: `${row.id}_msg_${index + 1}`, role: message.r === "u" ? "user" : "assistant",
+                type: message.k === "img" ? "image" : message.k === "stk" ? "emoji" : "text",
+                content: ["img", "stk"].includes(message.k) ? message.u || "" : message.t || "",
+                timestamp: asTimestamp(message.ts ?? Date.now() + index),
+                ...(message.n ? { senderName: message.n } : {}),
+                ...(sender.length === 1 ? { charId: sender[0].id } : {}),
+              };
+            });
+          const chat = toEphoneChat({ id: row.id, name: row.remark || row.name, avatar: row.av || "", history,
+            persona: [row.persona, options.sys].filter(Boolean).join("\n\n"),
+            myPersona: mask ? mask.desc || "" : global.bio, myAvatar: mask?.av || global.avatar,
+            isPinned: Boolean(options.pin), worldBookIds: linked,
+            settings: { maxMemory: options.ctx || 20, background: options.bg || "", autoReply: options.auto !== false,
+              worldBookEnabled: options.wb !== false, worldBookOnly: Boolean(options.wbOnly) },
+            members: isGroup ? asArray(row.m).map((id) => {
+              const member = contacts.find((contact) => String(contact.id) === String(id));
+              return member ? { id: member.id, name: member.name, avatar: member.av || "", persona: member.persona || "" } : { id, name: String(id) };
+            }) : undefined,
+          }, isGroup);
+          return { ...chat, myName: mask?.name || global.name, realName: row.name, remarkName: row.remark || "", firstMessage: row.greet || "" };
+        };
+        return { version: 3, timestamp: Date.now(), data: {
+          chats: [...contacts.map((contact) => convertChat(contact, false)), ...asArray(data.gr).map((group) => convertChat(group, true))],
+          worldBooks, userStickers: extractStickers("danshuiji", rawData), apiConfig: [], globalSettings: [global],
+        } };
+      }
+
+      function toDanshuijiBackup(sourceFormat, rawData) {
+        const common = toEphoneCompatible(sourceFormat, rawData).data;
+        const chats = asArray(common.chats);
+        const global = firstRecord(common.globalSettings);
+        const stickers = extractStickers(sourceFormat, rawData);
+        const first = chats.find((chat) => !chat.isGroup) || chats[0] || {};
+        const wx = { id: "converted_user", nick: global.name || first.myName || "我",
+          av: global.avatar || first.settings?.myAvatar || "", sig: global.bio || "", ph: "", qq: "", pw: "" };
+        const data = { wx, accts: [wx], ct: [], gr: [], ch: {}, cs: {},
+          stk: [...new Set(stickers.map((sticker) => sticker.url))],
+          masks: [{ id: "dsj_mask_default", name: wx.nick, av: wx.av, desc: global.bio || "" }], maskDef: "dsj_mask_default", wb: [] };
+        const ids = new Map();
+        const bindings = new Map();
+        const addContact = (chat, fallbackId) => {
+          const sourceId = String(chat.originalCharId || chat.id || fallbackId);
+          if (ids.has(sourceId)) return ids.get(sourceId);
+          const id = `dsj_char_${data.ct.length + 1}`;
+          ids.set(sourceId, id);
+          if (chat.id != null) ids.set(String(chat.id), id);
+          const maskId = `dsj_mask_${data.masks.length + 1}`;
+          data.masks.push({ id: maskId, name: chat.myName || wx.nick,
+            av: chat.settings?.myAvatar || chat.settings?.["my-avatar"] || wx.av,
+            desc: chat.settings?.myPersona ?? chat.settings?.["my-persona"] ?? global.bio ?? "" });
+          data.ct.push({ id, name: chat.realName || chat.name || "未命名角色", remark: chat.remarkName || "",
+            av: chat.avatar || chat.settings?.aiAvatar || "", persona: chillPersona(chat), mask: maskId,
+            greet: chat.firstMessage || "", wxid: "", ph: "" });
+          bindings.set(id, asArray(chat.settings?.linkedWorldBookIds || chat.worldBookIds).map(String));
+          data.ch[id] = [];
+          return id;
+        };
+        chats.filter((chat) => !chat.isGroup).forEach((chat, index) => addContact(chat, `private_${index}`));
+        chats.forEach((chat, index) => {
+          let id;
+          if (chat.isGroup) {
+            id = `dsj_group_${data.gr.length + 1}`;
+            const members = [...new Set(asArray(chat.members).map((member, memberIndex) =>
+              addContact(member && typeof member === "object" ? member : { id: member, name: String(member) }, `${index}_member_${memberIndex}`)))];
+            data.gr.push({ id, name: chat.name || "未命名群聊", m: members });
+            bindings.set(id, asArray(chat.settings?.linkedWorldBookIds || chat.worldBookIds).map(String));
+          } else id = ids.get(String(chat.originalCharId || chat.id || `private_${index}`));
+          data.cs[id] = { pin: Boolean(chat.isPinned), ctx: Number(chat.settings?.maxMemory || 20),
+            bg: chat.settings?.background || "", auto: chat.settings?.autoReply !== false,
+            wb: chat.settings?.worldBookEnabled !== false,
+            wbOnly: Boolean(bindings.get(id)?.length || chat.settings?.worldBookOnly) };
+          data.ch[id] = normalizeMessages(chat.history).filter((message) => !message.isSummary &&
+            ["user", "assistant"].includes(message.role) && ["text", "image", "emoji", "sticker"].includes(message.type || "text") &&
+            typeof message.content === "string").map((message) => {
+              const isImage = message.type === "image";
+              const isSticker = ["emoji", "sticker"].includes(message.type);
+              const sticker = isSticker ? stickers.find((row) => row.name === message.content || row.id === message.content) : null;
+              const sender = message.charId != null ? data.ct.find((contact) => contact.id === ids.get(String(message.charId))) : null;
+              return { r: message.role === "user" ? "u" : "a", t: isImage ? "[图片]" : isSticker ? "[表情包]" : message.content,
+                ts: message.timestamp,
+                ...((isImage || isSticker) ? { k: isImage ? "img" : "stk", u: sticker?.url || message.content } : {}),
+                ...(chat.isGroup && message.role === "assistant" && (sender || message.senderName)
+                  ? { n: sender?.name || message.senderName } : {}),
+              };
+            });
+        });
+        asArray(common.worldBooks).forEach((book) => {
+          const bound = [...bindings].filter(([, list]) => list.includes(String(book.id))).map(([id]) => id);
+          toSullyWorldbooks([book]).forEach((entry) => data.wb.push({ title: entry.title, content: entry.content,
+            keys: entry.key.join(","), on: !entry.disable, constant: entry.constant, bind: bound }));
+        });
+        return { _dsj: 1, app: "淡水机", exported: new Date().toISOString(), parts: ["wx", "book", "mask"], stripped: true, data };
+      }
+
       function perigeeUser(data, charId) {
         const presets = asArray(data.myPersonaPresets);
         const npcId = String(data.activePersonaId || "").startsWith("officialnpc:") ? data.activePersonaId.slice(12) : null;
@@ -2603,6 +2740,7 @@
       }
 
       function toEphoneCompatibleRaw(sourceFormat, rawData) {
+        if (sourceFormat === "danshuiji") return danshuijiToEphone(rawData);
         if (sourceFormat === "perigee") return perigeeToEphone(rawData);
         if (sourceFormat === "sxiphone") return sxiphoneToEphone(rawData);
         if (sourceFormat === "chill") return chillToEphone(rawData);
@@ -3033,6 +3171,7 @@
       }
 
       function extractStickers(sourceFormat, rawData) {
+        if (sourceFormat === "danshuiji") return normalizeStickerList(asArray(danshuijiData(rawData).stk).map((url, index) => ({ name: `表情 ${index + 1}`, url })));
         if (sourceFormat === "perigee") return normalizeStickerList([
           ...asArray(rawData.userStickers),
           ...asArray(rawData.stickerData?.stickers).filter((sticker) => sticker.type !== "emoji")
@@ -4305,6 +4444,7 @@
       }
 
       function collectStats(format, data) {
+        if (format === "danshuiji") return collectStats("ephone", danshuijiToEphone(data));
         if (format === "perigee") return collectStats("ephone", perigeeToEphone(data));
         if (format === "sxiphone") return collectStats("ephone", sxiphoneToEphone(data));
         if (format === "chill") {
@@ -4412,7 +4552,7 @@
       function targetSupportsNuojiji(target) {
         // 弯弯与 Float 都从 ephone 中间格式生成，糯叽机已有对应的规范化路径。
         // yuan改uwu / 1900版uwu / miya 同样只依赖这条路径，所以一并放行。
-        return ["ephone", "octopus", "nuojiji", "wanwan", "float", "yuanuwu", "1900uwu", "miya", "chill", "sxiphone", "perigee"].includes(target);
+        return ["ephone", "octopus", "nuojiji", "wanwan", "float", "yuanuwu", "1900uwu", "miya", "chill", "sxiphone", "perigee", "danshuiji"].includes(target);
       }
 
       async function gzipJson(data) {
@@ -4544,6 +4684,11 @@
             const blob = new Blob([JSON.stringify(output)], { type: "application/json" });
             showSuccess(source.sourceLabel, "Perigee OS", collectStats("perigee", output), blob, `perigee-os-converted-${date}.json`);
             document.getElementById("result-details").textContent = "迁移角色、人设、私聊与群聊、文本和图片消息、表情、世界书及用户身份。到 Perigee OS 设置的导入入口选择此 JSON，勾选 LINE 聊天、世界书和个人身份资料。长期记忆、语音、转账、API 配置与各平台专属数据不迁移；多本绑定世界书会合并为一本。";
+          } else if (target === "danshuiji") {
+            const output = toDanshuijiBackup(source.format, source.data);
+            const blob = new Blob([JSON.stringify(output)], { type: "application/json" });
+            showSuccess(source.sourceLabel, "淡水机", collectStats("danshuiji", output), blob, `danshuiji-converted-${date}.json`);
+            document.getElementById("result-details").textContent = "到淡水机 设置 → 数据管理 → 导入数据，勾选微信、世界书、面具，再选择覆盖导入。迁移角色、人设、私聊与群聊、文本、图片、图片表情、世界书及面具身份；不迁移长期记忆、语音、转账、API 配置和专属应用数据。表情库没有名称字段，按图片地址保留；高级世界书触发规则不保证跨项目等价。";
           } else {
             const output = toSullyBackup(target, source.format, source.data, options);
             const blob = new Blob([JSON.stringify(output, null, 2)], { type: "application/json" });
