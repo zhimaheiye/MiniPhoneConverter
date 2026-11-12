@@ -967,6 +967,31 @@ assert.equal(anoScoped.indexedDB.world_book[0].books[0].content, '天空城');
 assert.equal(context.toYuanUwuBackup('ano', anoNative).chats.length, 3);
 assert.equal(context.to1900UwuBackup('ano', anoNative).groups.length, 1);
 assert.ok((await context.toMiyaBackup('ano', anoNative)).size > 0);
+const anoApis = [
+  { name: '常用', type: 'official', url: 'https://official.example.test/', apiKey: 'fixture-official', model: 'model-a' },
+  { name: '中转', type: 'public', url: 'https://proxy.example.test/team/', apiKey: 'fixture-proxy', model: 'model-b', models: ['model-c'] },
+  { name: '完整路径', type: 'official', url: 'https://custom.example.test/v1/chat/completions', apiKey: 'fixture-custom', model: 'model-d' },
+];
+const anoWithApi = { ...anoNative, localStorage: { ...anoNative.localStorage,
+  api_configs: JSON.stringify(anoApis), selected_api_config_index: '1',
+} };
+const handWithAnoApi = JSON.parse(JSON.stringify(context.toSullyBackup('sully-hand', 'ano', anoWithApi)));
+assert.deepEqual(handWithAnoApi.apiConfig, { apiType: 'openai', baseUrl: 'https://proxy.example.test/team/api', apiKey: 'fixture-proxy', model: 'model-b' });
+assert.deepEqual(handWithAnoApi.availableModels, ['model-b', 'model-c']);
+assert.deepEqual(handWithAnoApi.apiPresets.map((preset) => preset.config.baseUrl), [
+  'https://official.example.test/v1', 'https://proxy.example.test/team/api', 'https://custom.example.test/v1',
+]);
+assert.equal(context.toSullyBackup('sully-hand', 'ano', anoNative).apiConfig, undefined);
+const incompleteAno = { ...anoWithApi, localStorage: { ...anoWithApi.localStorage,
+  api_configs: JSON.stringify([{ ...anoApis[0], apiKey: '' }, anoApis[1]]), selected_api_config_index: '0',
+} };
+assert.equal(context.toSullyBackup('sully-hand', 'ano', incompleteAno).apiConfig, undefined, '无 Key 的配置不能覆盖现用主 API');
+const anoWithNativeMinimax = { ...anoWithApi, localStorage: { ...anoWithApi.localStorage,
+  minimax_api_config: JSON.stringify({ apiKey: 'fixture-minimax', groupId: 'fixture-group' }),
+} };
+const handWithNativeMinimax = context.toSullyBackup('sully-hand', 'ano', anoWithNativeMinimax);
+assert.equal(handWithNativeMinimax.apiConfig, undefined, '原生 MiniMax 使用不同协议，不能用通用预设替换');
+assert.equal(handWithNativeMinimax.apiPresets.length, 3);
 
 const sources = {
   ephone,

@@ -2379,6 +2379,46 @@
         } };
       }
 
+      function anoToHandApi(rawData) {
+        const read = (key) => {
+          const value = rawData.localStorage?.[key] ?? rawData.appStorage?.[key];
+          if (typeof value !== "string") return value;
+          try { return JSON.parse(value); } catch { return value; }
+        };
+        const configs = asArray(read("api_configs"));
+        const selectedIndex = Number.parseInt(read("selected_api_config_index"), 10);
+        const selected = configs[selectedIndex] || configs[0];
+        const presets = [];
+        let apiConfig;
+        let availableModels;
+        for (const [index, row] of configs.entries()) {
+          if (typeof row?.url !== "string") continue;
+          let url;
+          try { url = new URL(row.url.trim()); } catch { continue; }
+          if (!/^https?:$/.test(url.protocol) || url.username || url.password || url.search || url.hash) continue;
+          const prefix = row.type === "official" ? "/v1" : "/api";
+          let path = url.pathname.replace(/\/+$/, "");
+          if (/\/chat\/completions$/.test(path)) path = path.slice(0, -"/chat/completions".length);
+          else if (!path.endsWith(prefix)) path += prefix;
+          // Ano 拼接前缀和请求路径，手抓的 baseUrl 已包含前缀。
+          const config = { apiType: "openai", baseUrl: url.origin + path,
+            apiKey: typeof row.apiKey === "string" ? row.apiKey.trim() : "",
+            model: typeof row.model === "string" && row.model.trim() ? row.model.trim() : "gpt-3.5-turbo" };
+          const name = typeof row.name === "string" ? row.name.trim() : "";
+          presets.push({ id: `ano_api_${index + 1}`, name: name || `Ano API ${index + 1}`, config });
+          if (row === selected && config.apiKey) {
+            apiConfig = config;
+            const models = asArray(row.models).filter((model) => typeof model === "string").map((model) => model.trim()).filter(Boolean);
+            availableModels = [...new Set([config.model, ...models])];
+          }
+        }
+        const minimax = read("minimax_api_config");
+        // Ano 原生 MiniMax 通道优先，协议与手抓的通用聊天接口不同。
+        if (minimax?.apiKey && minimax.groupId) { apiConfig = undefined; availableModels = undefined; }
+        return { ...(presets.length ? { apiPresets: presets } : {}),
+          ...(apiConfig ? { apiConfig, availableModels } : {}) };
+      }
+
       function toAnoBackup(sourceFormat, rawData) {
         const data = toEphoneCompatible(sourceFormat, rawData).data;
         const chats = asArray(data.chats);
@@ -3585,6 +3625,7 @@
 
         if (target === "sully-hand") {
           output.version = 3;
+          if (sourceFormat === "ano") Object.assign(output, anoToHandApi(rawData));
           if (memories.length) {
             const { nodes, vectors } = memoriesToHand(memories, options);
             output.memoryNodes = [...asArray(output.memoryNodes), ...nodes];
