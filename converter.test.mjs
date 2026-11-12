@@ -917,6 +917,57 @@ dsjEmptyMask.data.masks[0].desc = '';
 const emptyMaskOutput = context.toDanshuijiBackup('danshuiji', dsjEmptyMask).data;
 assert.equal(emptyMaskOutput.masks.find((mask) => mask.id === emptyMaskOutput.ct[0].mask).desc, '', '空面具不能被默认身份替换');
 
+const anoNative = { meta: { appName: 'Milvus-Phone', version: '2.0', timestamp: 1700000000000 }, indexedDB: {
+  chat_characters: [
+    { id: 11, name: '星', avatar: 11, pinned: true, profile: { personality: '温柔', background: '住在天空城' } },
+    { id: 12, name: '月', avatar: 'graph/player-1.png', profile: { personality: '冷静' } },
+    { id: 'group_chat_13', type: 'group', name: '群聊', profile: { members: [{ id: 11, name: '星' }, { id: 12, name: '月' }] } },
+    { id: 'moments_11', type: 'moments' }, { id: 'decor_11', type: 'decor' },
+  ],
+  chat_history: [
+    { characterId: 11, id: 1700000000100, isMe: true, type: 'text', text: '你好' },
+    { characterId: 11, id: 1700000000101, type: 'image', text: '[图片]', content: 'https://example.test/photo.png' },
+    { characterId: 11, id: 1700000000102, type: 'image', text: '[表情包: 笑]', content: 'https://example.test/sticker.png' },
+    { characterId: 11, id: 1700000000103, type: 'text', isSummary: true, text: '摘要' },
+    { characterId: 'group_chat_13', id: 1700000000110, type: 'text', sender: '月', text: '群里见' },
+  ],
+  avatars: [{ id: 11, avatarData: 'https://example.test/star.png' }],
+  user_settings: [{ key: 'role_avatar_11', value: 'blob:expired' }, { key: 'user_avatar_11', value: 'https://example.test/me.png' }],
+  world_book: [{ id: 'world_book_data', books: [
+    { id: 1, title: '天空城', content: '设定', enable: true }, { id: 2, title: '停用条目', content: '停用内容', enable: false },
+  ] }],
+  emojis: [{ id: 'smile', name: '笑', url: 'https://example.test/sticker.png' }],
+}, localStorage: { active_persona_id: 'p1', user_personas: JSON.stringify([{ id: 'p1', name: '玩家', personality: '旅行者' }]) } };
+const anoRead = await context.readBackup({ name: 'MilvusPhone_Backup.json', text: async () => JSON.stringify(anoNative) });
+assert.equal(anoRead.format, 'ano');
+const anoCommon = context.toEphoneCompatible('ano', anoNative).data;
+assert.equal(anoCommon.chats.length, 3, '装扮及动态记录不能变成角色');
+assert.equal(anoCommon.chats[0].avatar, 'https://example.test/star.png', '无效自定义头像回落到头像表');
+assert.equal(anoCommon.chats[1].avatar, 'https://anima97833.github.io/Ano-Phone-demo-/graph/player-1.png');
+assert.equal(anoCommon.chats[0].settings.myAvatar, 'https://example.test/me.png');
+assert.equal(anoCommon.chats[0].settings.aiPersona, '温柔\n\n住在天空城');
+assert.equal(anoCommon.chats[0].history[0].timestamp, 1700000000100);
+assert.equal(anoCommon.chats[0].history.length, 3);
+assert.equal(anoCommon.chats[0].history[2].type, 'emoji');
+assert.equal(anoCommon.chats[2].history[0].charId, 12);
+assert.equal(anoCommon.worldBooks[1].content[0].enabled, false);
+const anoRoundtrip = context.toAnoBackup('ano', anoNative);
+const [anoStar, anoMoon, anoGroup] = anoRoundtrip.indexedDB.chat_characters;
+assert.equal(typeof anoStar.id, 'number');
+assert.match(anoGroup.id, /^group_chat_/);
+assert.equal(anoGroup.profile.members[1].id, anoMoon.id);
+assert.equal(anoRoundtrip.indexedDB.avatars.find((row) => row.id === anoStar.avatar).avatarData, 'https://example.test/star.png');
+assert.equal(anoRoundtrip.indexedDB.chat_history.find((row) => row.characterId === anoGroup.id).sender, '月');
+assert.equal(anoRoundtrip.indexedDB.chat_history[2].isEmoji, true);
+assert.equal(anoRoundtrip.indexedDB.world_book[0].books[0].enable, true);
+assert.equal(JSON.parse(anoRoundtrip.localStorage.user_personas)[0].personality, '旅行者');
+const anoScoped = context.toAnoBackup('ephone', ephone);
+assert.equal(anoScoped.indexedDB.world_book[0].books[0].enable, false, '带关键词的条目不能变成全局常驻');
+assert.equal(anoScoped.indexedDB.world_book[0].books[0].content, '天空城');
+assert.equal(context.toYuanUwuBackup('ano', anoNative).chats.length, 3);
+assert.equal(context.to1900UwuBackup('ano', anoNative).groups.length, 1);
+assert.ok((await context.toMiyaBackup('ano', anoNative)).size > 0);
+
 const sources = {
   ephone,
   octopus: octopusSource,
@@ -930,6 +981,7 @@ const sources = {
   sxiphone: sxNative,
   perigee: perigeeNative,
   danshuiji: dsjNative,
+  ano: anoNative,
 };
 
 // 每种源格式转成弯弯与 Float
@@ -972,10 +1024,13 @@ for (const [format, data] of Object.entries(sources)) {
   assert.ok(dsjOutput.data.ct.length > 0, `${format} → 淡水机没有角色`);
   assert.ok(Object.values(dsjOutput.data.ch).some((history) => history.length > 0), `${format} → 淡水机没有消息`);
   assert.equal((await context.readBackup({ name: `${format}-dsj.json`, text: async () => JSON.stringify(dsjOutput) })).format, 'danshuiji');
+  const anoOutput = context.toAnoBackup(format, data);
+  assert.ok(anoOutput.indexedDB.chat_characters.length > 0, `${format} → Ano 没有角色`);
+  assert.ok(anoOutput.indexedDB.chat_history.length > 0, `${format} → Ano 没有消息`);
 }
 
 // 弯弯与 Float 转成其余每种格式
-for (const [format, data] of [['wanwan', wanwan], ['float', floatData], ['chill', chillRead.data], ['sxiphone', sxNative], ['perigee', perigeeNative], ['danshuiji', dsjNative]]) {
+for (const [format, data] of [['wanwan', wanwan], ['float', floatData], ['chill', chillRead.data], ['sxiphone', sxNative], ['perigee', perigeeNative], ['danshuiji', dsjNative], ['ano', anoNative]]) {
   const asOctopus = context.toOctopusBackup(format, data);
   assert.ok(asOctopus.characters.length + asOctopus.groups.length > 0, `${format} → 章鱼机 为空`);
 
@@ -1188,6 +1243,7 @@ for (const [format, data] of Object.entries(newSources)) {
   assert.ok(asPerigee.characters.length > 0, `${format} → Perigee 为空`);
   const asDsj = context.toDanshuijiBackup(format, data);
   assert.ok(asDsj.data.ct.length > 0, `${format} → 淡水机为空`);
+  assert.ok(context.toAnoBackup(format, data).indexedDB.chat_history.length > 0, `${format} → Ano 没有消息`);
 }
 
 // ===== 记忆迁移 =====

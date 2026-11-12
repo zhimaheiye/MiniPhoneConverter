@@ -16,6 +16,7 @@
 - [SxiPhone 小手机](https://siixii00.github.io/sxiphone00/) 的 JSON 备份：普通导出、完整备份、SXStorage 原生备份，以及最小备份中的角色。支持从 `persistedData`、`chatSessions`、`keyValue`、`localforage` 或 `localStorage` 读取通用数据。
 - [Perigee OS](https://mitsukililia.github.io/perigee-os-public-version/) 的完整 JSON 备份、LINE 聊天分板块备份和世界书分板块备份。
 - [淡水机](https://weiguzhi1112.github.io/danshuiji/) 的 `_dsj: 1` 分 App JSON 备份，以及包含 `ct` / `ch` 的旧版完整 JSON 备份。
+- [Ano Phone](https://anima97833.github.io/Ano-Phone-demo-/) 的 `MilvusPhone_Backup_*.json` 原生备份，包含 `meta.appName: "Milvus-Phone"`。
 
 输出规则：
 
@@ -31,6 +32,11 @@
 - 目标为“SxiPhone 小手机”时生成原生 JSON，迁移角色、人设、普通私聊文本、头像、用户身份、世界书与表情。群聊、长期记忆、API 配置及专属应用数据不迁移；仅含群聊的备份会明确报错。
 - 目标为“Perigee OS”时生成原生 JSON，迁移角色、人设、私聊、群聊及成员关联、文本和图片消息、图片表情、世界书与用户身份。长期记忆（包括总结消息）、语音、转账、API 配置、放送局及各平台专属数据不迁移。
 - 目标为“淡水机”时生成原生分 App JSON，迁移角色、人设、私聊、群聊及成员关联、文本和图片消息、图片表情、世界书与面具身份。长期记忆、语音、转账、API 配置和专属应用数据不迁移。
+- 目标为“Ano Phone”时生成 Milvus 原生 JSON，迁移角色、私聊、群聊、文本和图片消息、图片表情、世界书及当前用户身份。
+
+### Ano Phone 导入说明
+
+在 Ano Phone 的**备份与恢复**中选择转换后的文件，再选**增量合并导入**。文件包含世界书或面具时，相应列表会被替换。世界书正文和标题会保留。Ano Phone 会全局注入启用的条目，因此原来带关键词或角色绑定的条目默认关闭，按需启用。会话保留昵称和头像，用户人设使用一个当前面具。长期记忆、语音、转账、API 配置和专属应用数据不迁移。
 
 ### 淡水机导入说明
 
